@@ -1,13 +1,17 @@
 """iPhone'daki KickCam uygulamasından görüntü alır ve sanal webcam'e basar.
 
-Protokol: TCP, her kare = 4 bayt big-endian uzunluk + JPEG verisi.
+Protokol: TCP, her kare = 4 bayt big-endian uzunluk + JPEG verisi (iPhone -> PC).
+Ters yönde (PC -> iPhone) aynı bağlantıdan 4 bayt uzunluk + JSON gönderilir
+(sohbet mesajları: {"type": "chat"|"event"|"sys", ...}).
 Sanal kamera: pyvirtualcam (Windows'ta OBS Virtual Camera sürücüsünü kullanır;
 OBS Studio'nun kurulu olması yeterli, OBS'in açık olması gerekmez).
 """
+import json
 import socket
 import struct
 import threading
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -58,8 +62,12 @@ class Discovery:
 
 
 class CameraReceiver:
-    def __init__(self, host, port, on_frame, on_status, virtual_cam=True, fps=30, on_state=None):
+    def __init__(self, host, port, on_frame, on_status, virtual_cam=True, fps=30, on_state=None,
+                 history=None):
         self.on_state = on_state or (lambda s: None)
+        self._sock = None
+        self._send_lock = threading.Lock()
+        self._history = deque(history or [], maxlen=40)   # bağlanınca telefona gönderilecek son mesajlar
         self.host, self.port = host, port
         self.on_frame = on_frame          # on_frame(bgr ndarray)
         self.on_status = on_status
@@ -74,6 +82,23 @@ class CameraReceiver:
 
     def stop(self):
         self._stop.set()
+
+    def send_json(self, obj):
+        """Telefona mesaj gönder (her thread'den çağrılabilir). Bağlı değilse geçmişe ekler."""
+        self._history.append(obj)
+        self._write(obj)
+
+    def _write(self, obj):
+        data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        packet = struct.pack(">I", len(data)) + data
+        with self._send_lock:
+            sock = self._sock
+            if not sock:
+                return
+            try:
+                sock.sendall(packet)
+            except OSError:
+                pass   # okuma döngüsü kopmayı fark edip yeniden bağlanır
 
     def _recv_exact(self, sock, n):
         buf = bytearray()
@@ -107,6 +132,10 @@ class CameraReceiver:
                 self.on_status(f"{self.host}:{self.port} adresine bağlanılıyor...")
                 sock = socket.create_connection((self.host, self.port), timeout=5)
                 sock.settimeout(5)
+                with self._send_lock:
+                    self._sock = sock
+                for old in list(self._history):   # telefon son mesajları da görsün
+                    self._write(old)
                 self.on_state("connected")
                 self.on_status("iPhone kamerasına bağlanıldı")
                 count, t0 = 0, time.time()
@@ -129,6 +158,8 @@ class CameraReceiver:
                         count, t0 = 0, time.time()
                 sock.close()
             except Exception as e:
+                with self._send_lock:
+                    self._sock = None
                 self.on_state("retrying")
                 self.on_status(f"Kamera bağlantı hatası: {e} — 2 sn sonra tekrar denenecek")
                 time.sleep(2)

@@ -8,6 +8,8 @@ final class FrameServer {
     private var clients: [ObjectIdentifier: Client] = [:]
     private let queue = DispatchQueue(label: "kickcam.server")
     var onClientsChanged: ((Int) -> Void)?
+    /// PC'den gelen JSON mesajları (sohbet vb.), ana thread'de çağrılır.
+    var onMessage: (([String: Any]) -> Void)?
 
     final class Client {
         let conn: NWConnection
@@ -50,7 +52,24 @@ final class FrameServer {
         }
         clients[id] = client
         conn.start(queue: queue)
+        receiveLoop(client)
         notify()
+    }
+
+    /// PC -> iPhone: [4 bayt big-endian uzunluk][JSON]
+    private func receiveLoop(_ client: Client) {
+        client.conn.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] header, _, _, error in
+            guard let self, error == nil, let header, header.count == 4 else { return }
+            let length = header.reduce(0) { ($0 << 8) | Int($1) }
+            guard length > 0, length < 1_000_000 else { client.conn.cancel(); return }
+            client.conn.receive(minimumIncompleteLength: length, maximumLength: length) { body, _, _, error in
+                if let body,
+                   let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+                    DispatchQueue.main.async { self.onMessage?(obj) }
+                }
+                if error == nil { self.receiveLoop(client) }
+            }
+        }
     }
 
     private func notify() {

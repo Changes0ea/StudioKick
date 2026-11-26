@@ -1,4 +1,5 @@
 """KickStudio — Kick yayıncı paneli + iPhone sanal webcam (Windows)."""
+import collections
 import html
 import json
 import os
@@ -136,6 +137,7 @@ class MainWindow(QMainWindow):
         self.discovery = None
         self._last_frame = None
         self.me = {}
+        self._recent = collections.deque(maxlen=40)   # telefona gönderilecek son sohbet
         self._seen_ids = set()
 
         tabs = QTabWidget()
@@ -494,6 +496,7 @@ class MainWindow(QMainWindow):
         icons = {"broadcaster": "★ ", "moderator": "⚔ ", "vip": "◆ ", "subscriber": "♦ ",
                  "og": "● ", "founder": "✦ "}
         prefix = "".join(icons.get(b, "") for b in badges)
+        self._to_phone({"type": "chat", "user": m["username"], "content": m["content"], "badges": badges})
         item = QListWidgetItem(f"{prefix}{m['username']}:  {m['content']}")
         item.setData(Qt.UserRole, m)
         if "broadcaster" in badges:
@@ -523,11 +526,18 @@ class MainWindow(QMainWindow):
                         "Kicks": P["kick"], "Donation": P["gold"], "Tip": P["gold"],
                         "StreamHost": P["blue"], "Follow": P["turq"]}
         color = next((c for k, c in event_colors.items() if k in text), None)
+        if color:
+            self._to_phone({"type": "event", "text": text.replace("Olay: ", "").replace("Event", "")})
         item = QListWidgetItem(("✦ " if color else "⚙ ") + text)
         item.setForeground(QColor(color or P["lav"]))
         self.chat_list.addItem(item)
         self.chat_list.scrollToBottom()
         self.statusBar().showMessage(text, 8000)
+
+    def _to_phone(self, obj):
+        self._recent.append(obj)
+        if self.receiver:
+            self.receiver.send_json(obj)
 
     def send_chat(self):
         text = self.ed_msg.text().strip()
@@ -602,7 +612,8 @@ class MainWindow(QMainWindow):
         save_config(self.cfg)
         self.receiver = CameraReceiver(host, self.sp_port.value(), self.bus.frame.emit,
                                        self.bus.status.emit, self.chk_vcam.isChecked(),
-                                       self.sp_fps.value(), on_state=self.bus.cam_state.emit)
+                                       self.sp_fps.value(), on_state=self.bus.cam_state.emit,
+                                       history=list(self._recent))
         self.receiver.start()
         self.btn_cam.setText("Bağlantıyı Kes")
 

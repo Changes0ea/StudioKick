@@ -15,6 +15,8 @@ enum Brand {
     static let text = hex(0xD3E6FF)
     static let lav = hex(0xB4BFEE)
     static let kick = hex(0x53FC18)
+    static let sub = hex(0xB48CFF)
+    static let gold = hex(0xFFCF3F)
     static let accent = LinearGradient(colors: [turq, blue], startPoint: .leading, endPoint: .trailing)
 }
 
@@ -50,8 +52,73 @@ struct CameraPreview: UIViewRepresentable {
     func updateUIView(_ uiView: PreviewView, context: Context) {}
 }
 
+/// Yayın sırasında kameranın altında görünen sohbet.
+struct ChatPanel: View {
+    let lines: [ChatLine]
+    let connected: Bool
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 7) {
+                    if lines.isEmpty {
+                        Text(connected ? "Sohbet bekleniyor..." : "PC bağlanınca Kick sohbeti burada görünür")
+                            .font(.footnote).foregroundColor(Brand.lav)
+                            .frame(maxWidth: .infinity).padding(.top, 30)
+                    }
+                    ForEach(lines) { line in
+                        row(line).id(line.id)
+                    }
+                }
+                .padding(12)
+            }
+            .onChange(of: lines.count) { _ in
+                guard let last = lines.last else { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
+        }
+        .background(ChamferShape(cut: 12).fill(Brand.night.opacity(0.7)))
+        .overlay(ChamferShape(cut: 12).stroke(Brand.navy, lineWidth: 1))
+    }
+
+    @ViewBuilder private func row(_ line: ChatLine) -> some View {
+        switch line.kind {
+        case .chat:
+            (Text(icon(line.badges) + line.user + "  ").bold().foregroundColor(color(line.badges))
+             + Text(line.text).foregroundColor(Brand.text))
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .event:
+            Text("✦ " + line.text)
+                .font(.footnote.weight(.bold)).tracking(1)
+                .foregroundColor(Brand.night)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(ChamferShape(cut: 6).fill(Brand.sub))
+        case .system:
+            Text("⚙ " + line.text).font(.caption).italic().foregroundColor(Brand.lav)
+        }
+    }
+
+    private func icon(_ b: [String]) -> String {
+        if b.contains("broadcaster") { return "★ " }
+        if b.contains("moderator") { return "⚔ " }
+        if b.contains("vip") { return "◆ " }
+        if b.contains("subscriber") || b.contains("founder") { return "♦ " }
+        return ""
+    }
+
+    private func color(_ b: [String]) -> Color {
+        if b.contains("broadcaster") { return Brand.ice }
+        if b.contains("moderator") { return Brand.turq }
+        if b.contains("vip") { return Brand.gold }
+        if b.contains("subscriber") || b.contains("founder") { return Brand.sub }
+        return Brand.blue
+    }
+}
+
 struct ContentView: View {
     @StateObject private var cam = CameraManager()
+    @State private var showSettings = false
 
     var body: some View {
         ZStack {
@@ -74,27 +141,19 @@ struct ContentView: View {
                         .foregroundColor(Brand.ice)
                 }
 
-                Form {
-                    Section {
-                        Picker("Kamera", selection: $cam.useFront) {
-                            Text("Arka").tag(false)
-                            Text("Ön").tag(true)
-                        }.pickerStyle(.segmented)
-                        Picker("Çözünürlük", selection: $cam.resolution) {
-                            ForEach(Resolution.allCases) { Text($0.rawValue).tag($0) }
-                        }.pickerStyle(.segmented)
-                        sliderRow("FPS", "\(Int(cam.fps))") { Slider(value: $cam.fps, in: 10...60, step: 5) }
-                        sliderRow("KALİTE", "\(Int(cam.quality * 100))") { Slider(value: $cam.quality, in: 0.3...0.95) }
-                        sliderRow("ZOOM", String(format: "%.1fx", cam.zoom)) { Slider(value: $cam.zoom, in: 1...5) }
-                        Toggle("Fener", isOn: $cam.torch).disabled(cam.useFront)
-                    } header: {
-                        Text("KAMERA").tracking(3).foregroundColor(Brand.lav)
+                if cam.isRunning {
+                    Picker("", selection: $showSettings) {
+                        Text("SOHBET").tag(false)
+                        Text("KAMERA AYARLARI").tag(true)
                     }
-                    .listRowBackground(Brand.navy.opacity(0.35))
+                    .pickerStyle(.segmented)
                 }
-                .scrollContentBackground(.hidden)
-                .tint(Brand.turq)
-                .foregroundColor(Brand.text)
+
+                if cam.isRunning && !showSettings {
+                    ChatPanel(lines: cam.chat, connected: cam.clientCount > 0)
+                } else {
+                    settingsForm
+                }
 
                 Button(action: { cam.isRunning ? cam.stop() : cam.start() }) {
                     Text(cam.isRunning ? "YAYINI DURDUR" : "YAYINI BAŞLAT")
@@ -118,6 +177,30 @@ struct ContentView: View {
                                             set: { if !$0 { cam.errorMessage = nil } })) {
             Button("Tamam", role: .cancel) {}
         } message: { Text(cam.errorMessage ?? "") }
+    }
+
+    private var settingsForm: some View {
+        Form {
+            Section {
+                Picker("Kamera", selection: $cam.useFront) {
+                    Text("Arka").tag(false)
+                    Text("Ön").tag(true)
+                }.pickerStyle(.segmented)
+                Picker("Çözünürlük", selection: $cam.resolution) {
+                    ForEach(Resolution.allCases) { Text($0.rawValue).tag($0) }
+                }.pickerStyle(.segmented)
+                sliderRow("FPS", "\(Int(cam.fps))") { Slider(value: $cam.fps, in: 10...60, step: 5) }
+                sliderRow("KALİTE", "\(Int(cam.quality * 100))") { Slider(value: $cam.quality, in: 0.3...0.95) }
+                sliderRow("ZOOM", String(format: "%.1fx", cam.zoom)) { Slider(value: $cam.zoom, in: 1...5) }
+                Toggle("Fener", isOn: $cam.torch).disabled(cam.useFront)
+            } header: {
+                Text("KAMERA").tracking(3).foregroundColor(Brand.lav)
+            }
+            .listRowBackground(Brand.navy.opacity(0.35))
+        }
+        .scrollContentBackground(.hidden)
+        .tint(Brand.turq)
+        .foregroundColor(Brand.text)
     }
 
     private var header: some View {

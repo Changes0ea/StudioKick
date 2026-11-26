@@ -3,6 +3,15 @@ import CoreImage
 import ImageIO
 import UIKit
 
+struct ChatLine: Identifiable {
+    enum Kind { case chat, event, system }
+    let id = UUID()
+    let kind: Kind
+    let user: String
+    let text: String
+    let badges: [String]
+}
+
 enum Resolution: String, CaseIterable, Identifiable {
     case hd720 = "720p", hd1080 = "1080p"
     var id: String { rawValue }
@@ -19,6 +28,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published var torch = false { didSet { applyTorch() } }
     @Published var zoom: CGFloat = 1.0 { didSet { applyZoom() } }
     @Published var errorMessage: String?
+    @Published var chat: [ChatLine] = []
 
     let session = AVCaptureSession()
     private let server = FrameServer()
@@ -31,7 +41,12 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     override init() {
         super.init()
-        server.onClientsChanged = { [weak self] n in self?.clientCount = n }
+        server.onClientsChanged = { [weak self] n in
+            guard let self else { return }
+            if n > 0 && self.clientCount == 0 { self.chat.removeAll() }   // PC son mesajları tekrar gönderir
+            self.clientCount = n
+        }
+        server.onMessage = { [weak self] obj in self?.handle(obj) }
     }
 
     func start() {
@@ -59,6 +74,21 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         server.stop()
         isRunning = false
         UIApplication.shared.isIdleTimerDisabled = false
+    }
+
+    private func handle(_ obj: [String: Any]) {
+        let line: ChatLine
+        switch obj["type"] as? String {
+        case "chat":
+            line = ChatLine(kind: .chat, user: obj["user"] as? String ?? "?",
+                            text: obj["content"] as? String ?? "", badges: obj["badges"] as? [String] ?? [])
+        case "event":
+            line = ChatLine(kind: .event, user: "", text: obj["text"] as? String ?? "", badges: [])
+        default:
+            line = ChatLine(kind: .system, user: "", text: obj["text"] as? String ?? "", badges: [])
+        }
+        chat.append(line)
+        if chat.count > 150 { chat.removeFirst(chat.count - 150) }
     }
 
     private func reconfigure() {
