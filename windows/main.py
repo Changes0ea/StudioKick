@@ -8,7 +8,7 @@ import time
 
 import cv2
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QImage, QPixmap
+from PySide6.QtGui import QAction, QColor, QFont, QImage, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout,
                                QGroupBox, QHBoxLayout, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem,
@@ -37,19 +37,49 @@ DEFAULT_CONFIG = {
     "camera_fps": 30,
 }
 
-STYLE = """
-QWidget { background:#0b0e0f; color:#e8e8e8; font-family:'Segoe UI'; font-size:13px; }
-QGroupBox { border:1px solid #24272c; border-radius:8px; margin-top:14px; padding:10px; }
-QGroupBox::title { subcontrol-origin: margin; left:10px; color:#53fc18; }
-QPushButton { background:#53fc18; color:#000; border:none; border-radius:6px; padding:7px 14px; font-weight:600; }
-QPushButton:hover { background:#6dff3a; }
-QPushButton:disabled { background:#2a2d31; color:#777; }
-QPushButton#secondary { background:#24272c; color:#e8e8e8; }
-QLineEdit, QComboBox, QSpinBox, QListWidget, QTextBrowser {
-  background:#191b1f; border:1px solid #2a2d31; border-radius:6px; padding:5px; }
-QTabWidget::pane { border:none; }
-QTabBar::tab { background:#191b1f; padding:9px 18px; margin-right:2px; border-top-left-radius:6px; border-top-right-radius:6px; }
-QTabBar::tab:selected { background:#24272c; color:#53fc18; }
+# ChangesCraft tasarım dili (paylaşılan palet)
+PALETTE = {
+    "night": "#050B0A", "forest": "#06503F", "navy": "#14284A", "line": "#0E5A4A",
+    "blue": "#68ACFF", "sky": "#70C0FF", "ice": "#8AF2FF", "water": "#7CDEFF", "turq": "#2FE0C0",
+    "text": "#D3E6FF", "lav": "#B4BFEE",
+    "sub": "#B48CFF", "gold": "#FFCF3F", "kick": "#53FC18",
+}
+P = PALETTE
+STYLE = f"""
+QMainWindow, QWidget {{ background:{P['night']}; color:{P['text']};
+  font-family:'Montserrat','Segoe UI'; font-size:13px; }}
+QMainWindow {{ background: qlineargradient(x1:0,y1:1,x2:1,y2:0, stop:0 {P['forest']}, stop:0.45 {P['night']}, stop:1 {P['night']}); }}
+QTabWidget > QWidget, QTabWidget QWidget#page {{ background:transparent; }}
+QGroupBox {{ background: rgba(20,40,74,0.35); border:1px solid {P['navy']};
+  border-left:3px solid {P['turq']}; border-radius:4px; margin-top:16px; padding:12px 10px 10px 10px; }}
+QGroupBox::title {{ subcontrol-origin: margin; left:10px; padding:0 4px; color:{P['ice']};
+  font-weight:600; letter-spacing:2px; }}
+QLabel {{ background:transparent; }}
+QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {P['turq']}, stop:1 {P['blue']});
+  color:{P['night']}; border:none; border-radius:4px; padding:8px 16px; font-weight:700; letter-spacing:1px; }}
+QPushButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {P['ice']}, stop:1 {P['sky']}); }}
+QPushButton:disabled {{ background:{P['navy']}; color:#5a6b85; }}
+QPushButton#secondary {{ background:rgba(20,40,74,0.6); color:{P['text']}; border:1px solid {P['navy']}; }}
+QPushButton#secondary:hover {{ border-color:{P['turq']}; color:{P['ice']}; }}
+QLineEdit, QComboBox, QSpinBox, QListWidget, QTextBrowser {{
+  background: rgba(5,11,10,0.75); border:1px solid {P['navy']}; border-radius:4px; padding:6px;
+  selection-background-color:{P['line']}; }}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color:{P['turq']}; }}
+QListWidget::item {{ padding:4px 2px; border-bottom:1px solid rgba(20,40,74,0.5); }}
+QCheckBox {{ background:transparent; }}
+QCheckBox::indicator:checked {{ background:{P['turq']}; border:1px solid {P['turq']}; }}
+QCheckBox::indicator:unchecked {{ background:{P['night']}; border:1px solid {P['navy']}; }}
+QTabWidget::pane {{ border:none; background:transparent; }}
+QTabBar::tab {{ background:transparent; color:{P['lav']}; padding:10px 20px; margin-right:4px;
+  border-bottom:2px solid transparent; letter-spacing:2px; font-weight:600; }}
+QTabBar::tab:selected {{ color:{P['ice']}; border-bottom:2px solid {P['turq']}; }}
+QTabBar::tab:hover {{ color:{P['ice']}; }}
+QStatusBar {{ background:rgba(5,11,10,0.9); color:{P['lav']}; border-top:1px solid {P['navy']}; }}
+QMenu {{ background:{P['night']}; border:1px solid {P['navy']}; }}
+QMenu::item:selected {{ background:{P['line']}; }}
+QScrollBar:vertical {{ background:transparent; width:8px; }}
+QScrollBar::handle:vertical {{ background:{P['navy']}; border-radius:4px; min-height:30px; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ height:0; }}
 """
 
 
@@ -95,7 +125,7 @@ def run_bg(fn, bus, on_ok=None):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("KickStudio — Yayıncı Paneli")
+        self.setWindowTitle("ChangesCraft Studio — Kick Yayıncı Paneli")
         self.resize(1180, 760)
         self.cfg = load_config()
         self.bus = Bus()
@@ -109,10 +139,15 @@ class MainWindow(QMainWindow):
         self._seen_ids = set()
 
         tabs = QTabWidget()
-        tabs.addTab(self._build_dashboard(), "Panel")
-        tabs.addTab(self._build_camera(), "iPhone Kamera")
-        tabs.addTab(self._build_settings(), "Ayarlar")
-        self.setCentralWidget(tabs)
+        tabs.addTab(self._build_dashboard(), "PANEL")
+        tabs.addTab(self._build_camera(), "IPHONE KAMERA")
+        tabs.addTab(self._build_settings(), "AYARLAR")
+        central = QWidget()
+        cl = QVBoxLayout(central)
+        cl.setContentsMargins(14, 10, 14, 4)
+        cl.addWidget(self._build_header())
+        cl.addWidget(tabs)
+        self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
         self.ind_chat = QLabel()
         self.ind_cam = QLabel()
@@ -141,6 +176,34 @@ class MainWindow(QMainWindow):
 
         self._init_api()
         self._start_discovery()
+
+    def _build_header(self):
+        bar = QWidget(objectName="header")
+        bar.setAttribute(Qt.WA_StyledBackground, True)
+        bar.setStyleSheet(f"QWidget#header {{ background:transparent; border-bottom:1px solid {P['navy']}; }}")
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(4, 4, 4, 10)
+        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        logo_path = os.path.join(base, "assets", "logo.png")
+        if os.path.exists(logo_path):
+            logo = QLabel()
+            logo.setPixmap(QPixmap(logo_path).scaledToHeight(40, Qt.SmoothTransformation))
+            h.addWidget(logo)
+        mark = QLabel(f"<span style='color:{P['ice']}'>CHANGES</span>"
+                      f"<span style='color:{P['blue']}'>CRAFT</span>")
+        f = mark.font()
+        f.setPointSize(20)
+        f.setWeight(QFont.Light)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, 6)
+        mark.setFont(f)
+        sub = QLabel(f"<span style='color:{P['lav']}; letter-spacing:3px'>STUDIO  ·  KICK</span>")
+        h.addWidget(mark)
+        h.addSpacing(12)
+        h.addWidget(sub)
+        h.addStretch()
+        self.lbl_live_badge = QLabel("")
+        h.addWidget(self.lbl_live_badge)
+        return bar
 
     # ===================== PANEL =====================
     def _build_dashboard(self):
@@ -253,7 +316,7 @@ class MainWindow(QMainWindow):
 
         self.preview = QLabel("Önizleme", alignment=Qt.AlignCenter)
         self.preview.setMinimumSize(640, 360)
-        self.preview.setStyleSheet("background:#000;border-radius:8px;")
+        self.preview.setStyleSheet(f"background:{P['night']}; color:{P['lav']}; border:3px solid {P['turq']}; border-radius:4px;")
         root.addLayout(side, 3)
         root.addWidget(self.preview, 7)
         return w
@@ -349,9 +412,13 @@ class MainWindow(QMainWindow):
             self.lbl_user.setText(f"<b>{html.escape(me.get('name', ''))}</b>  (kick.com/{ch.get('slug', '')})")
         stream = ch.get("stream") or {}
         if stream.get("is_live"):
-            self.lbl_live.setText("<span style='color:#53fc18'>● CANLI</span>")
+            self.lbl_live.setText(f"<span style='color:{P['kick']}'>● CANLI</span>")
+            self.lbl_live_badge.setText(
+                f"<span style='background:{P['kick']}; color:{P['night']}; font-weight:800;'>"
+                f"&nbsp; ● CANLI · {stream.get('viewer_count', 0)} izleyici &nbsp;</span>")
         else:
-            self.lbl_live.setText("<span style='color:#888'>● Çevrimdışı</span>")
+            self.lbl_live.setText(f"<span style='color:{P['lav']}'>● Çevrimdışı</span>")
+            self.lbl_live_badge.setText(f"<span style='color:{P['lav']}'>● ÇEVRİMDIŞI</span>")
         self.lbl_viewers.setText(str(stream.get("viewer_count", 0)))
         self.lbl_started.setText(stream.get("start_time") or "—")
         self.lbl_cat.setText((ch.get("category") or {}).get("name", "—"))
@@ -423,9 +490,22 @@ class MainWindow(QMainWindow):
             if m["id"] in self._seen_ids:
                 return                     # kendi mesajımızın websocket yankısı
             self._seen_ids.add(m["id"])
-        badges = "".join(f"[{b}] " for b in m["badges"] if b)
-        item = QListWidgetItem(f"{badges}{m['username']}: {m['content']}")
+        badges = [b for b in m["badges"] if b]
+        icons = {"broadcaster": "★ ", "moderator": "⚔ ", "vip": "◆ ", "subscriber": "♦ ",
+                 "og": "● ", "founder": "✦ "}
+        prefix = "".join(icons.get(b, "") for b in badges)
+        item = QListWidgetItem(f"{prefix}{m['username']}:  {m['content']}")
         item.setData(Qt.UserRole, m)
+        if "broadcaster" in badges:
+            item.setForeground(QColor(P["ice"]))
+        elif "moderator" in badges:
+            item.setForeground(QColor(P["turq"]))
+        elif "vip" in badges:
+            item.setForeground(QColor(P["gold"]))
+        elif "subscriber" in badges or "founder" in badges:
+            item.setForeground(QColor(P["sub"]))
+        else:
+            item.setForeground(QColor(P["text"]))
         self.chat_list.addItem(item)
         if self.chat_list.count() > 500:
             self.chat_list.takeItem(0)
@@ -439,8 +519,12 @@ class MainWindow(QMainWindow):
         lbl.setText(f"{name}: <span style='color:{color}'>●</span> {text}")
 
     def _add_sys(self, text):
-        item = QListWidgetItem("⚙ " + text)
-        item.setForeground(Qt.gray)
+        event_colors = {"Subscription": P["sub"], "GiftedSubscriptions": P["sub"],
+                        "Kicks": P["kick"], "Donation": P["gold"], "Tip": P["gold"],
+                        "StreamHost": P["blue"], "Follow": P["turq"]}
+        color = next((c for k, c in event_colors.items() if k in text), None)
+        item = QListWidgetItem(("✦ " if color else "⚙ ") + text)
+        item.setForeground(QColor(color or P["lav"]))
         self.chat_list.addItem(item)
         self.chat_list.scrollToBottom()
         self.statusBar().showMessage(text, 8000)
