@@ -1,11 +1,11 @@
-# KickStudio
+# ChangesStudio
 
 İki parçadan oluşur:
 
 | Parça | Platform | Görevi |
 |---|---|---|
-| `windows/` | Windows 10/11 (Python + Qt) | Kick yayıncı paneli + iPhone görüntüsünü **sanal webcam** olarak sisteme verir |
-| `ios/` | iPhone (iOS 16+, Swift) | **KickCam**: kamerayı Wi‑Fi üzerinden bilgisayara gönderir |
+| `windows/` | Windows 10/11 (Python + Qt) | Kick yayıncı paneli (ChangesStudio) + iPhone görüntüsünü **sanal webcam** olarak sisteme verir |
+| `ios/` | iPhone (iOS 16+, Swift) | **ChangesLens**: kamerayı Wi‑Fi üzerinden bilgisayara gönderir |
 
 ## Özellikler
 **Yayıncı paneli:** Kick ile OAuth girişi · canlı/çevrimdışı durumu, izleyici sayısı (30 sn'de bir yenilenir) · yayın başlığı ve kategori değiştirme · canlı sohbeti okuma ve sohbete mesaj yazma · sağ tıkla timeout (1 dk / 10 dk / 1 saat), kalıcı ban, ban kaldırma.
@@ -42,7 +42,7 @@ Xcode'da *Signing & Capabilities* → Team olarak Apple ID'ni seç → iPhone'u 
 
 ## 3) Kullanım
 1. iPhone ve PC aynı Wi‑Fi ağında olsun (5 GHz önerilir).
-2. iPhone'da KickCam → **Yayını Başlat**
+2. iPhone'da ChangesLens → **YAYINI BAŞLAT**
 3. PC'de KickStudio → **iPhone Kamera** sekmesi → listeden telefonunu seç (veya ekrandaki IP'yi gir) → **Bağlan**
 4. OBS'te: Kaynak ekle → *Video Yakalama Cihazı* → **OBS Virtual Camera**
    (Dikkat: OBS'in kendi "Sanal Kamerayı Başlat" butonuna basma; çünkü cihazı KickStudio kullanıyor.

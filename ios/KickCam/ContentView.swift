@@ -18,21 +18,19 @@ enum Brand {
     static let sub = hex(0xB48CFF)
     static let gold = hex(0xFFCF3F)
     static let accent = LinearGradient(colors: [turq, blue], startPoint: .leading, endPoint: .trailing)
-}
 
-/// Logodaki gibi kesik köşeli şekil.
-struct ChamferShape: Shape {
-    var cut: CGFloat = 14
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX + cut, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - cut))
-        p.addLine(to: CGPoint(x: r.maxX - cut, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.minX, y: r.minY + cut))
-        p.closeSubpath()
-        return p
+    /// Marka fontu: uygulamaya Coolvetica eklenirse onu, yoksa Inter Tight'ı kullanır.
+    static func font(_ size: CGFloat, _ weight: Font.Weight = .medium) -> Font {
+        if UIFont(name: "Coolvetica-Regular", size: size) != nil || UIFont(name: "Coolvetica", size: size) != nil {
+            return .custom(UIFont(name: "Coolvetica-Regular", size: size) != nil ? "Coolvetica-Regular" : "Coolvetica", size: size)
+        }
+        let name: String
+        switch weight {
+        case .heavy, .black: name = "InterTight-ExtraBold"
+        case .bold, .semibold: name = "InterTight-Bold"
+        default: name = "InterTight-Medium"
+        }
+        return .custom(name, size: size)
     }
 }
 
@@ -65,7 +63,7 @@ struct ChatPanel: View {
                 LazyVStack(alignment: .leading, spacing: 7) {
                     if lines.isEmpty {
                         Text(connected ? "Sohbet bekleniyor..." : "PC bağlanınca Kick sohbeti burada görünür")
-                            .font(.footnote).foregroundColor(Brand.lav)
+                            .font(Brand.font(13)).foregroundColor(Brand.lav)
                             .frame(maxWidth: .infinity).padding(.top, 30)
                     }
                     ForEach(lines) { line in
@@ -79,8 +77,8 @@ struct ChatPanel: View {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last.id, anchor: .bottom) }
             }
         }
-        .background(ChamferShape(cut: 12).fill(Brand.night.opacity(0.7)))
-        .overlay(ChamferShape(cut: 12).stroke(Brand.navy, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Brand.night.opacity(0.7)))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Brand.navy, lineWidth: 1))
     }
 
     @ViewBuilder private func row(_ line: ChatLine) -> some View {
@@ -88,16 +86,16 @@ struct ChatPanel: View {
         case .chat:
             (Text(icon(line.badges) + line.user + "  ").bold().foregroundColor(color(line.badges))
              + Text(line.text).foregroundColor(Brand.text))
-                .font(.callout)
+                .font(Brand.font(16))
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .event:
             Text("✦ " + line.text)
-                .font(.footnote.weight(.bold)).tracking(1)
+                .font(Brand.font(13, .bold)).tracking(1)
                 .foregroundColor(Brand.night)
                 .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(ChamferShape(cut: 6).fill(Brand.sub))
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Brand.sub))
         case .system:
-            Text("⚙ " + line.text).font(.caption).italic().foregroundColor(Brand.lav)
+            Text("⚙ " + line.text).font(Brand.font(12)).italic().foregroundColor(Brand.lav)
         }
     }
 
@@ -129,11 +127,20 @@ struct ContentView: View {
                 .tabItem { Label("AYARLAR", systemImage: "slider.horizontal.3") }
         }
         .tint(Brand.turq)
+        .font(Brand.font(15))
         .preferredColorScheme(.dark)
         .onAppear {
             let tab = UITabBarAppearance()
             tab.configureWithOpaqueBackground()
             tab.backgroundColor = UIColor(red: 0.02, green: 0.04, blue: 0.04, alpha: 0.96)
+            if let f = UIFont(name: "InterTight-Bold", size: 11) {
+                for item in [tab.stackedLayoutAppearance, tab.inlineLayoutAppearance, tab.compactInlineLayoutAppearance] {
+                    item.normal.titleTextAttributes = [.font: f]
+                    item.selected.titleTextAttributes = [.font: f]
+                }
+            }
+            UISegmentedControl.appearance().setTitleTextAttributes(
+                [.font: UIFont(name: "InterTight-Bold", size: 13) ?? .boldSystemFont(ofSize: 13)], for: .normal)
             UITabBar.appearance().standardAppearance = tab
             UITabBar.appearance().scrollEdgeAppearance = tab
         }
@@ -141,6 +148,18 @@ struct ContentView: View {
                                             set: { if !$0 { cam.errorMessage = nil } })) {
             Button("Tamam", role: .cancel) {}
         } message: { Text(cam.errorMessage ?? "") }
+    }
+}
+
+/// Canlı yayın etiketindeki nabız gibi atan nokta.
+struct PulseDot: View {
+    @State private var on = false
+    var body: some View {
+        Circle().fill(Color.white).frame(width: 7, height: 7)
+            .opacity(on ? 0.35 : 1)
+            .scaleEffect(on ? 0.8 : 1.1)
+            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: on)
+            .onAppear { on = true }
     }
 }
 
@@ -166,8 +185,8 @@ struct StreamTab: View {
                         header
                         CameraPreview(session: cam.session, onLayer: cam.attachPreview)
                             .aspectRatio(16 / 9, contentMode: .fit)
-                            .clipShape(ChamferShape())
-                            .overlay(ChamferShape().stroke(Brand.accent, lineWidth: 3))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Brand.accent, lineWidth: 3))
                             .overlay(alignment: .topLeading) { liveTag }
                             .shadow(color: Brand.turq.opacity(cam.clientCount > 0 ? 0.45 : 0.12), radius: 10)
                             .frame(maxHeight: .infinity)
@@ -176,7 +195,7 @@ struct StreamTab: View {
                     .frame(width: geo.size.width * 0.6)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("SOHBET").font(.caption.weight(.bold)).tracking(3).foregroundColor(Brand.lav)
+                        Text("SOHBET").font(Brand.font(12, .bold)).tracking(3).foregroundColor(Brand.lav)
                         ChatPanel(lines: cam.chat, connected: cam.clientCount > 0)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -189,11 +208,19 @@ struct StreamTab: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image("Logo").resizable().scaledToFit().frame(height: 24)
-            (Text("CHANGES").foregroundColor(Brand.ice) + Text("CRAFT").foregroundColor(Brand.blue))
-                .font(.system(size: 16, weight: .light))
-                .tracking(3)
-            Text("CAM").font(.caption2.weight(.semibold)).tracking(2).foregroundColor(Brand.lav)
+            Image("Logo").resizable().scaledToFit().frame(height: 28)
+            HStack(spacing: 5) {
+                Text("Changes")
+                    .font(Brand.font(21, .heavy))
+                    .foregroundStyle(LinearGradient(colors: [Brand.ice, Brand.text],
+                                                    startPoint: .top, endPoint: .bottom))
+                Text("LENS")
+                    .font(Brand.font(11, .heavy)).tracking(1.5)
+                    .foregroundColor(Brand.night)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(Brand.accent))
+                    .rotationEffect(.degrees(-4))
+            }
             Spacer()
             statusChip
         }
@@ -203,21 +230,23 @@ struct StreamTab: View {
         if cam.isRunning {
             let connected = cam.clientCount > 0
             Text(connected ? "● PC BAĞLI" : "● PC BEKLENİYOR")
-                .font(.caption2.weight(.bold)).tracking(1)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(ChamferShape(cut: 5).fill(connected ? Brand.kick : Brand.navy))
+                .font(Brand.font(11, .bold)).tracking(1)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(Capsule().fill(connected ? Brand.kick : Brand.navy))
                 .foregroundColor(connected ? Brand.night : Brand.lav)
         }
     }
 
     @ViewBuilder private var liveTag: some View {
         if cam.isRunning && cam.clientCount > 0 {
-            Text("● YAYINDA")
-                .font(.caption2.weight(.heavy)).tracking(1)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(ChamferShape(cut: 4).fill(Color.red.opacity(0.9)))
-                .foregroundColor(.white)
-                .padding(10)
+            HStack(spacing: 5) {
+                PulseDot()
+                Text("YAYINDA").font(Brand.font(11, .heavy)).tracking(1)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(Capsule().fill(Color.red.opacity(0.9)))
+            .foregroundColor(.white)
+            .padding(12)
         }
     }
 
@@ -225,34 +254,37 @@ struct StreamTab: View {
         HStack(spacing: 10) {
             if cam.isRunning {
                 Text("\(NetworkInfo.wifiIPAddress() ?? "IP yok") : 5050")
-                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    .font(Brand.font(12, .bold).monospacedDigit())
                     .foregroundColor(Brand.ice)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Capsule().fill(Brand.navy.opacity(0.55)))
                     .lineLimit(1).minimumScaleFactor(0.7)
             } else {
                 Text("Telefon ve PC aynı Wi‑Fi'da olmalı")
-                    .font(.caption).foregroundColor(Brand.lav)
+                    .font(Brand.font(12)).foregroundColor(Brand.lav)
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
             Spacer(minLength: 4)
             Button(action: { cam.useFront.toggle() }) {
                 Image(systemName: "arrow.triangle.2.circlepath.camera")
                     .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 42, height: 38)
-                    .background(ChamferShape(cut: 7).fill(Brand.navy.opacity(0.7)))
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Brand.navy.opacity(0.75)))
                     .foregroundColor(Brand.ice)
             }
             Button(action: { cam.isRunning ? cam.stop() : cam.start() }) {
                 Text(cam.isRunning ? "DURDUR" : "YAYINI BAŞLAT")
-                    .font(.subheadline.weight(.heavy)).tracking(2)
-                    .padding(.horizontal, 18)
-                    .frame(height: 38)
+                    .font(Brand.font(15, .heavy)).tracking(2)
+                    .padding(.horizontal, 22)
+                    .frame(height: 40)
                     .background {
                         if cam.isRunning {
-                            ChamferShape(cut: 8).fill(Color.red.opacity(0.85))
+                            Capsule().fill(Color.red.opacity(0.85))
                         } else {
-                            ChamferShape(cut: 8).fill(Brand.accent)
+                            Capsule().fill(Brand.accent)
                         }
                     }
+                    .shadow(color: (cam.isRunning ? Color.red : Brand.turq).opacity(0.35), radius: 8, y: 2)
                     .foregroundColor(cam.isRunning ? .white : Brand.night)
             }
         }
@@ -293,7 +325,7 @@ struct SettingsTab: View {
                     infoRow("IP adresi", NetworkInfo.wifiIPAddress() ?? "Wi‑Fi bağlı değil")
                     infoRow("Port", "5050")
                 } header: { sectionTitle("BAĞLANTI") } footer: {
-                    Text("PC'deki ChangesCraft Studio > IPHONE KAMERA sekmesinden bu telefonu seç.")
+                    Text("PC'deki ChangesStudio > IPHONE KAMERA sekmesinden bu telefonu seç.")
                         .foregroundColor(Brand.lav)
                 }
                 .listRowBackground(Brand.navy.opacity(0.35))
@@ -311,16 +343,16 @@ struct SettingsTab: View {
         HStack {
             Text(k).foregroundColor(Brand.lav)
             Spacer()
-            Text(v).font(.system(.body, design: .monospaced)).foregroundColor(Brand.ice)
+            Text(v).font(Brand.font(15, .bold).monospacedDigit()).foregroundColor(Brand.ice)
         }
     }
 
     private func sliderRow<S: View>(_ title: String, _ value: String, @ViewBuilder slider: () -> S) -> some View {
         HStack {
-            Text(title).font(.caption.weight(.semibold)).tracking(2).foregroundColor(Brand.lav)
+            Text(title).font(Brand.font(12, .semibold)).tracking(2).foregroundColor(Brand.lav)
                 .frame(width: 70, alignment: .leading)
             slider()
-            Text(value).font(.caption.monospacedDigit()).foregroundColor(Brand.ice).frame(width: 44)
+            Text(value).font(Brand.font(12, .bold).monospacedDigit()).foregroundColor(Brand.ice).frame(width: 44)
         }
     }
 }

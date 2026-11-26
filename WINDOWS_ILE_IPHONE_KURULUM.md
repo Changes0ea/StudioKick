@@ -22,8 +22,8 @@ Sen de çıkan dosyayı Windows'tan **Sideloadly** ile telefona yüklersin.
 2. **Derle (iPhone IPA + Windows EXE)** → derleme kendiliğinden başlar.
    Başlamazsa sağdaki **Run workflow** butonuna bas.
 3. Yaklaşık 5–10 dakika sonra yeşil ✓ işareti çıkar. Tıkla, en alttaki **Artifacts** bölümünden indir:
-   - **KickCam-iPhone** → içinden `KickCam.ipa` çıkar
-   - **KickStudio-Windows** → hazır `KickStudio.exe` (Python kurmana gerek kalmaz)
+   - **ChangesLens-iPhone** → içinden `ChangesLens.ipa` çıkar
+   - **ChangesStudio-Windows** → hazır `ChangesStudio.exe` (Python kurmana gerek kalmaz)
 
 ## C) iPhone'a yükle (Sideloadly)
 1. Apple'ın sitesinden **iTunes**'u kur. Microsoft Store sürümü değil, apple.com'daki sürüm olmalı;
@@ -31,12 +31,12 @@ Sen de çıkan dosyayı Windows'tan **Sideloadly** ile telefona yüklersin.
 2. https://sideloadly.io adresinden Sideloadly'yi indirip kur.
 3. iPhone'u kabloyla bağla, telefonda "Bu bilgisayara güven" uyarısını onayla.
 4. Sideloadly'de:
-   - `KickCam.ipa` dosyasını pencereye sürükle
+   - `ChangesLens.ipa` dosyasını pencereye sürükle
    - Apple ID'ni (e-posta) yaz → **Start** → Apple ID şifreni gir
 5. iPhone'da:
    - **Ayarlar → Genel → VPN ve Cihaz Yönetimi** → Apple ID'ne dokun → **Güven**
    - **Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu** → Aç (telefon yeniden başlar)
-6. KickCam'i aç, Kamera ve Yerel Ağ izinlerine **İzin Ver** de.
+6. ChangesLens'i aç, Kamera ve Yerel Ağ izinlerine **İzin Ver** de.
 
 ## Bilmen gerekenler
 - **7 gün kuralı:** Ücretsiz Apple ID ile yüklenen uygulama 7 gün sonra açılmaz.

@@ -1,4 +1,4 @@
-"""KickStudio — Kick yayıncı paneli + iPhone sanal webcam (Windows)."""
+"""ChangesStudio — Kick yayıncı paneli + iPhone sanal webcam (Windows)."""
 import collections
 import html
 import json
@@ -9,7 +9,7 @@ import time
 
 import cv2
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QImage, QPixmap
+from PySide6.QtGui import QAction, QColor, QFont, QFontDatabase, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout,
                                QGroupBox, QHBoxLayout, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem,
@@ -46,42 +46,62 @@ PALETTE = {
     "sub": "#B48CFF", "gold": "#FFCF3F", "kick": "#53FC18",
 }
 P = PALETTE
+BRAND_FONT = "Segoe UI"   # main() içinde belirlenir
 STYLE = f"""
 QMainWindow, QWidget {{ background:{P['night']}; color:{P['text']};
-  font-family:'Montserrat','Segoe UI'; font-size:13px; }}
+  font-family:'__FONT__','Segoe UI'; font-size:13px; font-weight:500; }}
 QMainWindow {{ background: qlineargradient(x1:0,y1:1,x2:1,y2:0, stop:0 {P['forest']}, stop:0.45 {P['night']}, stop:1 {P['night']}); }}
-QTabWidget > QWidget, QTabWidget QWidget#page {{ background:transparent; }}
-QGroupBox {{ background: rgba(20,40,74,0.35); border:1px solid {P['navy']};
-  border-left:3px solid {P['turq']}; border-radius:4px; margin-top:16px; padding:12px 10px 10px 10px; }}
-QGroupBox::title {{ subcontrol-origin: margin; left:10px; padding:0 4px; color:{P['ice']};
-  font-weight:600; letter-spacing:2px; }}
+QGroupBox {{ background: rgba(20,40,74,0.38); border:1px solid rgba(104,172,255,0.18);
+  border-radius:18px; margin-top:20px; padding:16px 12px 12px 12px; }}
+QGroupBox::title {{ subcontrol-origin: margin; left:16px; padding:2px 10px; color:{P['night']};
+  background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {P['turq']}, stop:1 {P['blue']});
+  border-radius:9px; font-weight:800; }}
 QLabel {{ background:transparent; }}
 QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {P['turq']}, stop:1 {P['blue']});
-  color:{P['night']}; border:none; border-radius:4px; padding:8px 16px; font-weight:700; letter-spacing:1px; }}
+  color:{P['night']}; border:none; border-radius:17px; padding:9px 20px; font-weight:800; }}
 QPushButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {P['ice']}, stop:1 {P['sky']}); }}
+QPushButton:pressed {{ padding-top:10px; padding-bottom:8px; }}
 QPushButton:disabled {{ background:{P['navy']}; color:#5a6b85; }}
-QPushButton#secondary {{ background:rgba(20,40,74,0.6); color:{P['text']}; border:1px solid {P['navy']}; }}
+QPushButton#secondary {{ background:rgba(20,40,74,0.7); color:{P['text']}; border:1px solid rgba(104,172,255,0.25); }}
 QPushButton#secondary:hover {{ border-color:{P['turq']}; color:{P['ice']}; }}
 QLineEdit, QComboBox, QSpinBox, QListWidget, QTextBrowser {{
-  background: rgba(5,11,10,0.75); border:1px solid {P['navy']}; border-radius:4px; padding:6px;
+  background: rgba(5,11,10,0.8); border:1px solid rgba(104,172,255,0.2); border-radius:14px; padding:7px 12px;
   selection-background-color:{P['line']}; }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color:{P['turq']}; }}
-QListWidget::item {{ padding:4px 2px; border-bottom:1px solid rgba(20,40,74,0.5); }}
-QCheckBox {{ background:transparent; }}
+QListWidget {{ padding:8px; }}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border:1px solid {P['turq']}; }}
+QComboBox::drop-down {{ border:none; width:26px; }}
+QComboBox QAbstractItemView {{ background:{P['night']}; border:1px solid {P['navy']}; border-radius:10px; }}
+QListWidget::item {{ padding:6px 8px; margin:2px 0; border-radius:10px; }}
+QListWidget::item:hover {{ background:rgba(20,40,74,0.55); }}
+QListWidget::item:selected {{ background:rgba(47,224,192,0.15); color:{P['ice']}; }}
+QCheckBox {{ background:transparent; spacing:8px; }}
+QCheckBox::indicator {{ width:18px; height:18px; border-radius:9px; }}
 QCheckBox::indicator:checked {{ background:{P['turq']}; border:1px solid {P['turq']}; }}
 QCheckBox::indicator:unchecked {{ background:{P['night']}; border:1px solid {P['navy']}; }}
 QTabWidget::pane {{ border:none; background:transparent; }}
-QTabBar::tab {{ background:transparent; color:{P['lav']}; padding:10px 20px; margin-right:4px;
-  border-bottom:2px solid transparent; letter-spacing:2px; font-weight:600; }}
-QTabBar::tab:selected {{ color:{P['ice']}; border-bottom:2px solid {P['turq']}; }}
-QTabBar::tab:hover {{ color:{P['ice']}; }}
+QTabBar::tab {{ background:rgba(20,40,74,0.35); color:{P['lav']}; padding:9px 22px; margin:0 6px 8px 0;
+  border-radius:17px; font-weight:800; }}
+QTabBar::tab:selected {{ color:{P['night']};
+  background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {P['turq']}, stop:1 {P['blue']}); }}
+QTabBar::tab:hover:!selected {{ color:{P['ice']}; background:rgba(20,40,74,0.7); }}
 QStatusBar {{ background:rgba(5,11,10,0.9); color:{P['lav']}; border-top:1px solid {P['navy']}; }}
-QMenu {{ background:{P['night']}; border:1px solid {P['navy']}; }}
+QMenu {{ background:{P['night']}; border:1px solid {P['navy']}; border-radius:12px; padding:6px; }}
+QMenu::item {{ padding:6px 16px; border-radius:8px; }}
 QMenu::item:selected {{ background:{P['line']}; }}
-QScrollBar:vertical {{ background:transparent; width:8px; }}
+QScrollBar:vertical {{ background:transparent; width:8px; margin:4px; }}
 QScrollBar::handle:vertical {{ background:{P['navy']}; border-radius:4px; min-height:30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height:0; }}
 """
+
+
+def load_brand_font():
+    """Coolvetica bilgisayarda kuruluysa onu, değilse uygulamayla gelen Inter Tight'ı kullanır."""
+    if "Coolvetica" in QFontDatabase.families():
+        return "Coolvetica"
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    for name in ("InterTight-Medium.ttf", "InterTight-Bold.ttf", "InterTight-ExtraBold.ttf"):
+        QFontDatabase.addApplicationFont(os.path.join(base, "assets", "fonts", name))
+    return "Inter Tight" if "Inter Tight" in QFontDatabase.families() else "Segoe UI"
 
 
 def load_config():
@@ -126,7 +146,7 @@ def run_bg(fn, bus, on_ok=None):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ChangesCraft Studio — Kick Yayıncı Paneli")
+        self.setWindowTitle("ChangesStudio — Kick Yayıncı Paneli")
         self.resize(1180, 760)
         self.cfg = load_config()
         self.bus = Bus()
@@ -182,29 +202,37 @@ class MainWindow(QMainWindow):
     def _build_header(self):
         bar = QWidget(objectName="header")
         bar.setAttribute(Qt.WA_StyledBackground, True)
-        bar.setStyleSheet(f"QWidget#header {{ background:transparent; border-bottom:1px solid {P['navy']}; }}")
+        bar.setStyleSheet(f"QWidget#header {{ background:rgba(20,40,74,0.30); border:1px solid rgba(104,172,255,0.15);"
+                          f" border-radius:22px; }}")
         h = QHBoxLayout(bar)
-        h.setContentsMargins(4, 4, 4, 10)
+        h.setContentsMargins(14, 8, 16, 8)
+        h.setSpacing(10)
         base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
         logo_path = os.path.join(base, "assets", "logo.png")
         if os.path.exists(logo_path):
             logo = QLabel()
-            logo.setPixmap(QPixmap(logo_path).scaledToHeight(52, Qt.SmoothTransformation))
+            logo.setPixmap(QPixmap(logo_path).scaledToHeight(54, Qt.SmoothTransformation))
             h.addWidget(logo)
-        mark = QLabel(f"<span style='color:{P['ice']}'>CHANGES</span>"
-                      f"<span style='color:{P['blue']}'>CRAFT</span>")
-        f = mark.font()
-        f.setPointSize(20)
-        f.setWeight(QFont.Light)
-        f.setLetterSpacing(QFont.AbsoluteSpacing, 6)
+        mark = QLabel(f"<span style='color:{P['ice']}'>Changes</span>"
+                      f"<span style='color:{P['blue']}'>Studio</span>")
+        f = QFont(BRAND_FONT, 24)
+        f.setWeight(QFont.ExtraBold)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, -0.5)
         mark.setFont(f)
-        sub = QLabel(f"<span style='color:{P['lav']}; letter-spacing:3px'>STUDIO  ·  KICK</span>")
+        # genel stil kuralı (13px/500) fontu ezmesin diye boyut ve kalınlık burada da veriliyor
+        mark.setStyleSheet(f"font-family:'{BRAND_FONT}'; font-size:30px; font-weight:800; letter-spacing:-0.5px;")
+        sub = QLabel("KICK YAYINCI PANELİ")
+        sf = QFont(BRAND_FONT, 10)
+        sf.setWeight(QFont.Bold)
+        sf.setLetterSpacing(QFont.AbsoluteSpacing, 2)
+        sub.setFont(sf)
+        sub.setStyleSheet(f"color:{P['night']}; background:{P['lav']}; border-radius:11px; padding:4px 12px;"
+                          f" font-family:'{BRAND_FONT}'; font-size:11px; font-weight:800; letter-spacing:1.5px;")
         h.addWidget(mark)
-        h.addSpacing(12)
-        h.addWidget(sub)
+        h.addWidget(sub, 0, Qt.AlignVCenter)
         h.addStretch()
         self.lbl_live_badge = QLabel("")
-        h.addWidget(self.lbl_live_badge)
+        h.addWidget(self.lbl_live_badge, 0, Qt.AlignVCenter)
         return bar
 
     # ===================== PANEL =====================
@@ -305,7 +333,7 @@ class MainWindow(QMainWindow):
 
         help_ = QLabel(
             "<b>Nasıl kullanılır?</b><br>"
-            "1. iPhone'da <b>KickCam</b> uygulamasını aç, Yayını Başlat'a bas.<br>"
+            "1. iPhone'da <b>ChangesLens</b> uygulamasını aç, YAYINI BAŞLAT'a bas.<br>"
             "2. Telefon ve bilgisayar aynı Wi‑Fi'da olmalı.<br>"
             "3. Listeden iPhone'u seç ya da ekranda yazan IP'yi gir, Bağlan.<br>"
             "4. OBS / Discord / Zoom'da kamera olarak <b>OBS Virtual Camera</b> seç.<br><br>"
@@ -318,7 +346,7 @@ class MainWindow(QMainWindow):
 
         self.preview = QLabel("Önizleme", alignment=Qt.AlignCenter)
         self.preview.setMinimumSize(640, 360)
-        self.preview.setStyleSheet(f"background:{P['night']}; color:{P['lav']}; border:3px solid {P['turq']}; border-radius:4px;")
+        self.preview.setStyleSheet(f"background:{P['night']}; color:{P['lav']}; border:3px solid {P['turq']}; border-radius:22px;")
         root.addLayout(side, 3)
         root.addWidget(self.preview, 7)
         return w
@@ -415,12 +443,14 @@ class MainWindow(QMainWindow):
         stream = ch.get("stream") or {}
         if stream.get("is_live"):
             self.lbl_live.setText(f"<span style='color:{P['kick']}'>● CANLI</span>")
-            self.lbl_live_badge.setText(
-                f"<span style='background:{P['kick']}; color:{P['night']}; font-weight:800;'>"
-                f"&nbsp; ● CANLI · {stream.get('viewer_count', 0)} izleyici &nbsp;</span>")
+            self.lbl_live_badge.setText(f"● CANLI · {stream.get('viewer_count', 0)} izleyici")
+            self.lbl_live_badge.setStyleSheet(f"background:{P['kick']}; color:{P['night']}; font-weight:800;"
+                                              " border-radius:14px; padding:6px 14px;")
         else:
             self.lbl_live.setText(f"<span style='color:{P['lav']}'>● Çevrimdışı</span>")
-            self.lbl_live_badge.setText(f"<span style='color:{P['lav']}'>● ÇEVRİMDIŞI</span>")
+            self.lbl_live_badge.setText("● ÇEVRİMDIŞI")
+            self.lbl_live_badge.setStyleSheet(f"background:rgba(20,40,74,0.7); color:{P['lav']}; font-weight:800;"
+                                              " border-radius:14px; padding:6px 14px;")
         self.lbl_viewers.setText(str(stream.get("viewer_count", 0)))
         self.lbl_started.setText(stream.get("start_time") or "—")
         self.lbl_cat.setText((ch.get("category") or {}).get("name", "—"))
@@ -644,7 +674,10 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    app.setStyleSheet(STYLE)
+    global BRAND_FONT
+    BRAND_FONT = load_brand_font()
+    app.setFont(QFont(BRAND_FONT, 10))
+    app.setStyleSheet(STYLE.replace("__FONT__", BRAND_FONT))
     ico = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "assets", "icon.ico")
     if os.path.exists(ico):
         app.setWindowIcon(QIcon(ico))

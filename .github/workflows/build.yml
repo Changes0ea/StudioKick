@@ -8,7 +8,7 @@ on:
 jobs:
   ios:
     # Mac sunucu türü (gerekirse listeye macos-15 eklenebilir)
-    name: iPhone uygulaması (${{ matrix.os }})
+    name: iPhone uygulaması ChangesLens (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -39,14 +39,14 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R ios/build/Release-iphoneos/KickCam.app Payload/
-          zip -qry KickCam.ipa Payload
+          zip -qry ChangesLens.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: KickCam-iPhone-${{ matrix.os }}
-          path: KickCam.ipa
+          name: ChangesLens-iPhone-${{ matrix.os }}
+          path: ChangesLens.ipa
 
   windows:
-    name: Windows uygulaması (KickStudio.exe)
+    name: Windows uygulaması (ChangesStudio.exe)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,8 +62,8 @@ jobs:
         working-directory: windows
         run: |
           pip install -r requirements.txt pyinstaller
-          pyinstaller --noconfirm --windowed --name KickStudio --add-data "assets;assets" --icon assets/icon.ico main.py
+          pyinstaller --noconfirm --windowed --name ChangesStudio --add-data "assets;assets" --icon assets/icon.ico main.py
       - uses: actions/upload-artifact@v4
         with:
-          name: KickStudio-Windows
-          path: windows/dist/KickStudio
+          name: ChangesStudio-Windows
+          path: windows/dist/ChangesStudio
