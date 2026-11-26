@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import ImageIO
 import UIKit
 
@@ -32,9 +33,18 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     // Efektler (NVIDIA Broadcast'teki otomatik kadraj ve sanal arka planın karşılığı)
     @Published var autoFrame = UserDefaults.standard.bool(forKey: "autoFrame") {
-        didSet { effects.autoFrame = autoFrame; UserDefaults.standard.set(autoFrame, forKey: "autoFrame") }
+        didSet {
+            effects.autoFrame = autoFrame
+            UserDefaults.standard.set(autoFrame, forKey: "autoFrame")
+            if isRunning && oldValue != autoFrame { reconfigure() }   // kadraj için 1080p çekime geç
+        }
     }
-    @Published var frameTightness: Double = 3.2 { didSet { effects.frameTightness = frameTightness } }
+    @Published var frameTightness: Double = 3.8 { didSet { effects.frameTightness = frameTightness } }
+
+    // Telefon durumu
+    @Published var batteryLevel: Int = -1        // %; -1 = bilinmiyor
+    @Published var isCharging = false
+    @Published var isHot = false                 // telefon ısınınca uyarı
     @Published var background: BackgroundMode =
         BackgroundMode(rawValue: UserDefaults.standard.string(forKey: "background") ?? "") ?? .off {
         didSet { effects.background = background; UserDefaults.standard.set(background.rawValue, forKey: "background") }
@@ -57,6 +67,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private let effects = VideoEffects()
     private var lastPreview: CFAbsoluteTime = 0
+    private var outputWidth: CGFloat = 1280       // PC'ye giden genişlik (seçilen çözünürlük)
     private var previewShown = false
     private static var backgroundURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("background.jpg")
@@ -72,6 +83,20 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         server.onMessage = { [weak self] obj in self?.handle(obj) }
         effects.autoFrame = autoFrame
         effects.background = background
+        effects.frameTightness = frameTightness
+
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        updateBattery()
+        for name in [UIDevice.batteryLevelDidChangeNotification, UIDevice.batteryStateDidChangeNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.updateBattery()
+            }
+        }
+        NotificationCenter.default.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            let t = ProcessInfo.processInfo.thermalState
+            self?.isHot = t == .serious || t == .critical
+        }
         if let data = try? Data(contentsOf: Self.backgroundURL), let img = UIImage(data: data) {
             setBackgroundImage(img, save: false)
         }
@@ -135,6 +160,12 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
+    private func updateBattery() {
+        let d = UIDevice.current
+        batteryLevel = d.batteryLevel < 0 ? -1 : Int((d.batteryLevel * 100).rounded())
+        isCharging = d.batteryState == .charging || d.batteryState == .full
+    }
+
     /// Galeriden seçilen arka plan görselini hazırla (yönünü düzelt, küçült, kaydet).
     func setBackgroundImage(_ img: UIImage, save: Bool = true) {
         let maxSide: CGFloat = 1920
@@ -169,12 +200,16 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     }
 
     private func reconfigure() {
-        let front = useFront, res = resolution
+        let front = useFront, res = resolution, frame = autoFrame
+        // Otomatik kadraj açıkken daha yüksek çözünürlükte çek, kırpılan kısmı küçült:
+        // yakınlaşınca görüntü bulanıklaşmaz.
+        let preset: AVCaptureSession.Preset = (frame && res == .hd720) ? .hd1920x1080 : res.preset
+        outputWidth = res == .hd720 ? 1280 : 1920
         sessionQueue.async {
             self.session.beginConfiguration()
             self.session.inputs.forEach { self.session.removeInput($0) }
             self.session.outputs.forEach { self.session.removeOutput($0) }
-            self.session.sessionPreset = res.preset
+            self.session.sessionPreset = self.session.canSetSessionPreset(preset) ? preset : res.preset
 
             let pos: AVCaptureDevice.Position = front ? .front : .back
             guard let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: pos),
@@ -233,7 +268,16 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         lastSent = now
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        let image = fxOn ? effects.process(pb) : CIImage(cvPixelBuffer: pb)
+        var image = fxOn ? effects.process(pb) : CIImage(cvPixelBuffer: pb)
+        // Çekim çözünürlüğü seçilenden büyükse (kadraj modu) PC'ye seçilen boyutta gönder
+        if image.extent.width > outputWidth + 1 {
+            let k = outputWidth / image.extent.width
+            let f = CIFilter.lanczosScaleTransform()
+            f.inputImage = image
+            f.scale = Float(k)
+            f.aspectRatio = 1
+            image = f.outputImage ?? image.transformed(by: CGAffineTransform(scaleX: k, y: k))
+        }
 
         // Telefondaki önizleme: efekt açıkken işlenmiş görüntüyü ~15 FPS göster
         if fxOn && now - lastPreview > 1.0 / 15 {

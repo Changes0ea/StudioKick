@@ -22,7 +22,7 @@ final class VideoEffects {
     var backgroundImage: CIImage?
     var autoFrame = false
     /// Otomatik kadrajın ne kadar yakın çekeceği: 2.2 (yakın) ... 4.5 (geniş)
-    var frameTightness: Double = 3.2
+    var frameTightness: Double = 3.8
 
     var isActive: Bool { background != .off || autoFrame }
 
@@ -48,6 +48,8 @@ final class VideoEffects {
         } else {
             target = nil
             current = nil
+            smoothFace = nil
+            outsideSince = nil
         }
         return image
     }
@@ -95,37 +97,55 @@ final class VideoEffects {
         return scaled.transformed(by: CGAffineTransform(translationX: dx, y: dy)).cropped(to: rect)
     }
 
-    // MARK: - Otomatik kadraj (yüz takibi)
+    // MARK: - Otomatik kadraj (yüz takibi) — sabit, sinematik
+
+    /// Yüzün yumuşatılmış konumu/boyutu (görüntü koordinatında)
+    private var smoothFace: CGRect?
+    /// Yüz rahat bölgeden ne zamandan beri dışarıda
+    private var outsideSince: CFAbsoluteTime?
 
     private func reframe(_ image: CIImage, _ pb: CVPixelBuffer) -> CIImage {
         let ext = image.extent
         let now = CFAbsoluteTimeGetCurrent()
         frameIndex += 1
 
-        // Yüz tespiti her 3 karede bir: akıcı ama pil dostu
+        // 1) Yüz tespiti her 3 karede bir; ölçümler yumuşatılır (titreşimi süzer)
         if frameIndex % 3 == 0 {
             let handler = VNImageRequestHandler(cvPixelBuffer: pb, orientation: .up, options: [:])
             if (try? handler.perform([faces])) != nil, let found = faces.results, !found.isEmpty {
                 var union = found[0].boundingBox
                 for f in found.dropFirst() { union = union.union(f.boundingBox) }
                 let face = VNImageRectForNormalizedRect(union, Int(ext.width), Int(ext.height))
-                propose(for: face, in: ext)
+                smoothFace = smoothFace.map { lerp($0, face, 0.18) } ?? face
                 lastFaceAt = now
-            } else if now - lastFaceAt > 2.0 {
-                target = ext   // 2 sn yüz yoksa yavaşça tam kareye dön
             }
         }
 
-        let goal = target ?? ext
+        // 2) Hedef kadraj sadece gerçekten gerektiğinde değişir
         let cur = current ?? ext
-        let a: CGFloat = 0.07   // yumuşaklık (küçük = daha sinematik)
-        let next = CGRect(x: cur.minX + (goal.minX - cur.minX) * a,
-                          y: cur.minY + (goal.minY - cur.minY) * a,
-                          width: cur.width + (goal.width - cur.width) * a,
-                          height: cur.height + (goal.height - cur.height) * a)
+        if let face = smoothFace, now - lastFaceAt < 3.0 {
+            let ideal = idealCrop(for: face, in: ext)
+            if target == nil {
+                target = ideal
+            } else if needsReframe(face: face, crop: target!, ideal: ideal) {
+                if outsideSince == nil { outsideSince = now }
+                // 0,7 sn dışarıda kaldıysa kadrajı taşı (anlık hareketlere tepki verme)
+                if now - outsideSince! > 0.7 { target = ideal; outsideSince = nil }
+            } else {
+                outsideSince = nil
+            }
+        } else if now - lastFaceAt > 3.0 {
+            target = ext            // 3 sn yüz yoksa yavaşça tam kareye dön
+            smoothFace = nil
+        }
+
+        // 3) Yavaş, yumuşak geçiş (~1,5 sn); hedefe çok yaklaşınca tam dur
+        let goal = target ?? ext
+        var next = lerp(cur, goal, 0.035)
+        if abs(next.minX - goal.minX) < 0.5 && abs(next.width - goal.width) < 0.5 { next = goal }
         current = next
 
-        // Kırp ve tekrar tam boyuta büyüt (PC'ye giden çözünürlük değişmez)
+        // 4) Kırpılan bölgeyi tam kare boyutuna getir
         let s = ext.width / next.width
         return image.cropped(to: next)
             .transformed(by: CGAffineTransform(translationX: -next.minX, y: -next.minY))
@@ -133,23 +153,32 @@ final class VideoEffects {
             .cropped(to: CGRect(origin: .zero, size: ext.size))
     }
 
-    private func propose(for face: CGRect, in ext: CGRect) {
+    /// Yüz için ideal kadraj: yüz üst üçte birde, en fazla 1,8x yakınlaşma.
+    private func idealCrop(for face: CGRect, in ext: CGRect) -> CGRect {
         let aspect = ext.width / ext.height
-        let h = min(ext.height, max(face.height * frameTightness, ext.height * 0.42))
+        let h = min(ext.height, max(face.height * frameTightness, ext.height / 1.8))
         let w = h * aspect
-        // Yüzü kadrajın üst üçte birine yakın tut (CIImage'de y aşağıdan yukarı artar)
-        let cx = face.midX
-        let cy = face.midY - h * 0.12
-        var r = CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
+        var r = CGRect(x: face.midX - w / 2, y: face.midY - h * 0.62, width: w, height: h)
         r.origin.x = min(max(r.minX, ext.minX), ext.maxX - w)
         r.origin.y = min(max(r.minY, ext.minY), ext.maxY - h)
+        return r
+    }
 
-        // Ölü bölge: küçük kıpırdanmalarda kadraj oynamasın
-        if let t = target {
-            let moved = abs(t.midX - r.midX) / ext.width + abs(t.midY - r.midY) / ext.height
-            let resized = abs(t.height - r.height) / ext.height
-            if moved < 0.04 && resized < 0.06 { return }
-        }
-        target = r
+    /// Yüz, mevcut kadrajın ortasındaki rahat bölgeden çıktı mı ya da boyut çok mu değişti?
+    private func needsReframe(face: CGRect, crop: CGRect, ideal: CGRect) -> Bool {
+        // Kadraj zaten gidebileceği yerdeyse (ör. görüntünün kenarı) yeniden hedefleme
+        let same = abs(ideal.midX - crop.midX) < crop.width * 0.02 &&
+                   abs(ideal.midY - crop.midY) < crop.height * 0.02 &&
+                   abs(ideal.height - crop.height) < crop.height * 0.03
+        if same { return false }
+        let comfort = crop.insetBy(dx: crop.width * 0.30, dy: crop.height * 0.25)
+        let outside = !comfort.contains(CGPoint(x: face.midX, y: face.midY))
+        let sizeChange = abs(ideal.height - crop.height) / crop.height
+        return outside || sizeChange > 0.22
+    }
+
+    private func lerp(_ a: CGRect, _ b: CGRect, _ t: CGFloat) -> CGRect {
+        CGRect(x: a.minX + (b.minX - a.minX) * t, y: a.minY + (b.minY - a.minY) * t,
+               width: a.width + (b.width - a.width) * t, height: a.height + (b.height - a.height) * t)
     }
 }

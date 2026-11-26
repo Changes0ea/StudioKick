@@ -152,6 +152,41 @@ struct ContentView: View {
     }
 }
 
+/// Telefonun pil yüzdesi ve şarj durumu.
+struct BatteryPill: View {
+    let level: Int
+    let charging: Bool
+
+    private var icon: String {
+        if charging { return "battery.100percent.bolt" }
+        switch level {
+        case ..<0: return "battery.0percent"
+        case ..<13: return "battery.0percent"
+        case ..<38: return "battery.25percent"
+        case ..<63: return "battery.50percent"
+        case ..<88: return "battery.75percent"
+        default: return "battery.100percent"
+        }
+    }
+    private var color: Color {
+        if charging { return Brand.kick }
+        if level >= 0 && level <= 15 { return .red }
+        if level >= 0 && level <= 35 { return Brand.gold }
+        return Brand.ice
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 13, weight: .semibold))
+            Text(level < 0 ? "--" : "%\(level)").font(Brand.font(12, .heavy).monospacedDigit())
+        }
+        .foregroundColor(color)
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(Capsule().fill(Brand.navy.opacity(0.6)))
+        .overlay(Capsule().stroke(color.opacity(0.35), lineWidth: 1))
+    }
+}
+
 /// Canlı yayın etiketindeki nabız gibi atan nokta.
 struct PulseDot: View {
     @State private var on = false
@@ -195,6 +230,7 @@ struct StreamTab: View {
                             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Brand.accent, lineWidth: 3))
                             .overlay(alignment: .topLeading) { liveTag }
+                            .overlay(alignment: .bottom) { warnings }
                             .shadow(color: Brand.turq.opacity(cam.clientCount > 0 ? 0.45 : 0.12), radius: 10)
                             .frame(maxHeight: .infinity)
                         controls
@@ -229,6 +265,7 @@ struct StreamTab: View {
                     .rotationEffect(.degrees(-4))
             }
             Spacer()
+            BatteryPill(level: cam.batteryLevel, charging: cam.isCharging)
             statusChip
         }
     }
@@ -242,6 +279,26 @@ struct StreamTab: View {
                 .background(Capsule().fill(connected ? Brand.kick : Brand.navy))
                 .foregroundColor(connected ? Brand.night : Brand.lav)
         }
+    }
+
+    @ViewBuilder private var warnings: some View {
+        VStack(spacing: 6) {
+            if cam.batteryLevel >= 0 && cam.batteryLevel <= 15 && !cam.isCharging {
+                warning("battery.25percent", "Şarj %\(cam.batteryLevel) — yayın kesilmeden şarja tak", Color.red)
+            }
+            if cam.isHot {
+                warning("thermometer.sun.fill", "Telefon ısındı — FPS'i ya da efektleri azalt", Brand.gold)
+            }
+        }
+        .padding(10)
+    }
+
+    private func warning(_ icon: String, _ text: String, _ color: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(Brand.font(12, .bold))
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(Capsule().fill(color.opacity(0.92)))
+            .foregroundColor(color == Brand.gold ? Brand.night : .white)
     }
 
     private func fxButton(_ icon: String, on: Bool, action: @escaping () -> Void) -> some View {
@@ -271,14 +328,7 @@ struct StreamTab: View {
 
     private var controls: some View {
         HStack(spacing: 10) {
-            if cam.isRunning {
-                Text("\(NetworkInfo.wifiIPAddress() ?? "IP yok") : 5050")
-                    .font(Brand.font(12, .bold).monospacedDigit())
-                    .foregroundColor(Brand.ice)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Capsule().fill(Brand.navy.opacity(0.55)))
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            } else {
+            if !cam.isRunning {
                 Text("Telefon ve PC aynı Wi‑Fi'da olmalı")
                     .font(Brand.font(12)).foregroundColor(Brand.lav)
                     .lineLimit(1).minimumScaleFactor(0.7)
@@ -344,7 +394,7 @@ struct SettingsTab: View {
                 Section {
                     Toggle("Otomatik Kadraj (yüz takibi)", isOn: $cam.autoFrame)
                     if cam.autoFrame {
-                        sliderRow("YAKINLIK", cam.frameTightness < 2.8 ? "Yakın" : cam.frameTightness > 3.8 ? "Geniş" : "Orta") {
+                        sliderRow("YAKINLIK", cam.frameTightness < 3.0 ? "Yakın" : cam.frameTightness > 4.0 ? "Geniş" : "Orta") {
                             Slider(value: $cam.frameTightness, in: 2.2...4.5)
                         }
                     }
@@ -376,7 +426,7 @@ struct SettingsTab: View {
                         }
                     }
                 } header: { sectionTitle("EFEKTLER") } footer: {
-                    Text("Efektler telefonda işlenir; NVIDIA Broadcast gerekmez. Yeşil Perde, OBS'te Chroma Key ile arka planı tamamen silmek içindir. Eski iPhone'larda takılma olursa FPS'i 24'e indir.")
+                    Text("Efektler telefonda işlenir; NVIDIA Broadcast gerekmez. Otomatik kadraj açıkken kamera 1080p çeker, yakınlaşınca görüntü net kalır; küçük kıpırdanmalarda kadraj oynamaz. Yeşil Perde, OBS'te Chroma Key ile arka planı tamamen silmek içindir. Eski iPhone'larda takılma olursa FPS'i 24'e indir.")
                         .foregroundColor(Brand.lav)
                 }
                 .listRowBackground(Brand.navy.opacity(0.35))
@@ -393,6 +443,7 @@ struct SettingsTab: View {
                 Section {
                     infoRow("Durum", cam.isRunning ? (cam.clientCount > 0 ? "PC bağlı" : "PC bekleniyor") : "Kapalı")
                     infoRow("IP adresi", NetworkInfo.wifiIPAddress() ?? "Wi‑Fi bağlı değil")
+                    infoRow("Pil", cam.batteryLevel < 0 ? "--" : "%\(cam.batteryLevel)" + (cam.isCharging ? " · şarjda" : ""))
                     infoRow("Port", "5050")
                 } header: { sectionTitle("BAĞLANTI") } footer: {
                     Text("PC'deki ChangesStudio > IPHONE KAMERA sekmesinden bu telefonu seç.")
