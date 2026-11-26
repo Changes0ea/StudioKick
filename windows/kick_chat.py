@@ -9,15 +9,18 @@ import json
 import os
 import threading
 import time
+import uuid
 
 import requests
 import websocket
 
-DEFAULT_KEY = "32cbd69e4b950bf97679"
+DEFAULT_KEY = "34bf7a0ff419a2a775b9"   # Ekim 2026 sonrası anahtar
 DEFAULT_CLUSTER = "us2"
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
-FALLBACK_KEYS = ["32cbd69e4b950bf97679", "eb1d5f283081a78b932c"]
+RETIRED_KEYS = {"32cbd69e4b950bf97679", "eb1d5f283081a78b932c"}   # Kick'in kapattığı anahtarlar
+FALLBACK_KEYS = ["34bf7a0ff419a2a775b9"]
+REALTIME_URL = "https://web.kick.com/api/v1/realtime/connection"
 
 LOG_PATH = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
                         "KickStudio", "chat.log")
@@ -48,6 +51,43 @@ def _log(line):
         pass
 
 
+def _find_key(obj):
+    """Yanıt JSON'unun içinde (şekli tam bilinmediği için) app_key/cluster alanlarını arar."""
+    if isinstance(obj, dict):
+        key = obj.get("app_key") or obj.get("key") or obj.get("appKey")
+        if isinstance(key, str) and len(key) >= 16:
+            return key, obj.get("cluster") or DEFAULT_CLUSTER
+        for v in obj.values():
+            r = _find_key(v)
+            if r:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _find_key(v)
+            if r:
+                return r
+    return None
+
+
+def resolve_pusher_key():
+    """Kick'e güncel Pusher anahtarını sorar (kick.com her tarayıcıya bunu veriyor). Başarısızsa None."""
+    try:
+        r = requests.post(REALTIME_URL, timeout=10, headers={
+            "User-Agent": BROWSER_UA, "Accept": "application/json",
+            "Content-Type": "application/json", "Origin": "https://kick.com"},
+            json={"client": {"id": uuid.uuid4().hex, "type": "web"},
+                  "capabilities": {"accepted_providers": [{"provider": "pusher"}]}})
+        if r.status_code == 200:
+            found = _find_key(r.json())
+            if found:
+                _log(f"Kick güncel anahtar verdi: {found[0]} / {found[1]}")
+                return found
+        _log(f"anahtar sorgusu sonuçsuz: HTTP {r.status_code} {r.text[:300]}")
+    except Exception as e:
+        _log(f"anahtar sorgusu başarısız: {e}")
+    return None
+
+
 def find_chatroom_id(slug):
     """Kanal slug'ından chatroom id bulur. Cloudflare engellerse None döner."""
     try:
@@ -71,14 +111,15 @@ class KickChat:
         self.on_message = on_message
         self._status_cb = on_status or (lambda s: None)
         self.cluster = cluster or DEFAULT_CLUSTER
-        # kullanıcının anahtarı önce, sonra yedekler
-        self.keys = [key] + [k for k in FALLBACK_KEYS if k != key]
+        self._user_key = key if key and key not in RETIRED_KEYS else None
+        self.keys = []          # _run içinde Kick'e sorularak doldurulur
         self.key_index = 0
         self._stop = threading.Event()
         self._ws = None
         self._backoff = 3
         self._fatal = None          # yeniden denemenin anlamsız olduğu hata
         self._subscribed = False
+        self._refreshed = False
 
     def on_status(self, text):
         _log(text)
@@ -86,7 +127,8 @@ class KickChat:
 
     @property
     def url(self):
-        return (f"wss://ws-{self.cluster}.pusher.com/app/{self.keys[self.key_index]}"
+        key, cluster = self.keys[self.key_index]
+        return (f"wss://ws-{cluster}.pusher.com/app/{key}"
                 "?protocol=7&client=js&version=8.4.0&flash=false")
 
     def start(self):
@@ -103,6 +145,7 @@ class KickChat:
 
     def _run(self):
         _log(f"--- sohbet başlatılıyor, chatroom={self.chatroom_id}")
+        self._load_keys()
         while not self._stop.is_set():
             self._fatal = None
             self._subscribed = False
@@ -127,6 +170,10 @@ class KickChat:
                     self.key_index += 1
                     self.on_status("Yedek Pusher anahtarı deneniyor...")
                     continue
+                if self._fatal == 4001 and not self._refreshed:
+                    self._refreshed = True      # anahtar yeniden değişmiş olabilir: bir kez daha sor
+                    self._load_keys()
+                    continue
                 self.on_status("Sohbet durduruldu: " + PUSHER_ERRORS.get(self._fatal, str(self._fatal))
                                + " — Ayarlar'ı kontrol edip uygulamayı yeniden başlatın.")
                 self.on_state("stopped")
@@ -134,6 +181,24 @@ class KickChat:
             self.on_status(f"Sohbet bağlantısı koptu, {self._backoff} sn sonra tekrar denenecek")
             self._stop.wait(self._backoff)
             self._backoff = min(self._backoff * 2, 60)
+
+    def _load_keys(self):
+        """Sıra: Kick'in şu an verdiği anahtar -> Ayarlar'daki anahtar -> bilinen yedek."""
+        keys = []
+        live = resolve_pusher_key()
+        if live:
+            keys.append(live)
+        else:
+            self.on_status("Kick'ten güncel sohbet anahtarı alınamadı, kayıtlı anahtar deneniyor")
+        if self._user_key:
+            keys.append((self._user_key, self.cluster))
+        keys += [(k, DEFAULT_CLUSTER) for k in FALLBACK_KEYS]
+        seen, self.keys = set(), []
+        for k in keys:
+            if k[0] not in seen:
+                seen.add(k[0])
+                self.keys.append(k)
+        self.key_index = 0
 
     def _on_close(self, ws, code=None, reason=None):
         self.on_status(f"Sohbet bağlantısı kapandı (kod={code}, sebep={reason or '-'})")
@@ -177,7 +242,7 @@ class KickChat:
                 self._backoff = 1
         elif ev == "pusher:ping":
             ws.send(json.dumps({"event": "pusher:pong", "data": {}}))
-        elif ev == "App\\Events\\ChatMessageEvent":
+        elif ev in ("App\\Events\\ChatMessageEvent", "App\\Events\\ChatMessageSentEvent"):
             sender = data.get("sender", {})
             identity = sender.get("identity") or {}
             self.on_message({
