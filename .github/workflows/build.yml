@@ -1,0 +1,63 @@
+name: Derle (iPhone IPA + Windows EXE)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ios:
+    name: iPhone uygulaması (KickCam.ipa)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Klasör düzenini düzelt (dosyalar KickStudio/ içine yüklendiyse)
+        shell: bash
+        run: |
+          if [ ! -d ios ] && [ -d KickStudio ]; then shopt -s dotglob; mv KickStudio/* .; fi
+          ls
+      - name: XcodeGen kur
+        run: brew install xcodegen
+      - name: Xcode projesini oluştur
+        working-directory: ios
+        run: xcodegen
+      - name: İmzasız derle
+        working-directory: ios
+        run: |
+          xcodebuild -project KickCam.xcodeproj -target KickCam \
+            -configuration Release -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+      - name: IPA paketle
+        run: |
+          mkdir -p Payload
+          cp -R ios/build/Release-iphoneos/KickCam.app Payload/
+          zip -qry KickCam.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KickCam-iPhone
+          path: KickCam.ipa
+
+  windows:
+    name: Windows uygulaması (KickStudio.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Klasör düzenini düzelt (dosyalar KickStudio/ içine yüklendiyse)
+        shell: bash
+        run: |
+          if [ ! -d ios ] && [ -d KickStudio ]; then shopt -s dotglob; mv KickStudio/* .; fi
+          ls
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bağımlılıkları kur ve derle
+        working-directory: windows
+        run: |
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --noconfirm --windowed --name KickStudio main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KickStudio-Windows
+          path: windows/dist/KickStudio

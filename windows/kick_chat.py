@@ -15,6 +15,8 @@ import websocket
 
 DEFAULT_KEY = "32cbd69e4b950bf97679"
 DEFAULT_CLUSTER = "us2"
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
 FALLBACK_KEYS = ["32cbd69e4b950bf97679", "eb1d5f283081a78b932c"]
 
 LOG_PATH = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
@@ -63,7 +65,8 @@ def find_chatroom_id(slug):
 
 class KickChat:
     def __init__(self, chatroom_id, on_message, on_status=None,
-                 key=DEFAULT_KEY, cluster=DEFAULT_CLUSTER):
+                 key=DEFAULT_KEY, cluster=DEFAULT_CLUSTER, on_state=None):
+        self.on_state = on_state or (lambda s: None)   # connecting / connected / retrying / stopped
         self.chatroom_id = str(chatroom_id).strip()
         self.on_message = on_message
         self._status_cb = on_status or (lambda s: None)
@@ -91,6 +94,7 @@ class KickChat:
 
     def stop(self):
         self._stop.set()
+        self.on_state("stopped")
         if self._ws:
             try:
                 self._ws.close()
@@ -102,6 +106,7 @@ class KickChat:
         while not self._stop.is_set():
             self._fatal = None
             self._subscribed = False
+            self.on_state("connecting")
             self.on_status("Sohbet sunucusuna bağlanılıyor...")
             self._ws = websocket.WebSocketApp(
                 self.url,
@@ -109,11 +114,14 @@ class KickChat:
                 on_open=lambda ws: self.on_status("Sunucuya ulaşıldı, sohbet odasına katılınıyor..."),
                 on_close=self._on_close,
                 on_error=lambda ws, e: self.on_status(f"Sohbet ağ hatası: {type(e).__name__}: {e}"),
+                header={"User-Agent": BROWSER_UA},
             )
             # ping_interval > ping_timeout olmalı; yavaş ağlarda kopmasın diye geniş tutuldu
-            self._ws.run_forever(ping_interval=30, ping_timeout=20)
+            # Tarayıcı gibi görün: Kick yalnızca kick.com kaynaklı bağlantılara izin veriyor olabilir
+            self._ws.run_forever(ping_interval=30, ping_timeout=20, origin="https://kick.com")
             if self._stop.is_set():
                 break
+            self.on_state("retrying")
             if self._fatal:
                 if self._fatal == 4001 and self.key_index + 1 < len(self.keys):
                     self.key_index += 1
@@ -121,6 +129,7 @@ class KickChat:
                     continue
                 self.on_status("Sohbet durduruldu: " + PUSHER_ERRORS.get(self._fatal, str(self._fatal))
                                + " — Ayarlar'ı kontrol edip uygulamayı yeniden başlatın.")
+                self.on_state("stopped")
                 return
             self.on_status(f"Sohbet bağlantısı koptu, {self._backoff} sn sonra tekrar denenecek")
             self._stop.wait(self._backoff)
@@ -153,6 +162,7 @@ class KickChat:
             if not self._subscribed:
                 self._subscribed = True
                 self._backoff = 3
+                self.on_state("connected")
                 self.on_status(f"Sohbete bağlanıldı ✓ (oda {self.chatroom_id})")
         elif ev == "pusher:subscription_error":
             self.on_status(f"Sohbet odasına katılınamadı: {data}")

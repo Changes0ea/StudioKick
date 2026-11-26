@@ -77,6 +77,8 @@ class Bus(QObject):
     categories = Signal(list)
     camera_found = Signal(str, str, int)
     chat_sys = Signal(str)
+    chat_state = Signal(str)
+    cam_state = Signal(str)
 
 
 def run_bg(fn, bus, on_ok=None):
@@ -112,6 +114,13 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._build_settings(), "Ayarlar")
         self.setCentralWidget(tabs)
         self.setStatusBar(QStatusBar())
+        self.ind_chat = QLabel()
+        self.ind_cam = QLabel()
+        for lbl in (self.ind_chat, self.ind_cam):
+            lbl.setStyleSheet("padding:0 10px;")
+            self.statusBar().addPermanentWidget(lbl)
+        self._set_ind(self.ind_chat, "Sohbet", "stopped")
+        self._set_ind(self.ind_cam, "Kamera", "stopped")
 
         b = self.bus
         b.status.connect(lambda s: self.statusBar().showMessage(s, 8000))
@@ -123,6 +132,8 @@ class MainWindow(QMainWindow):
         b.categories.connect(self._show_categories)
         b.camera_found.connect(self._camera_found)
         b.chat_sys.connect(self._add_sys)
+        b.chat_state.connect(lambda st: self._set_ind(self.ind_chat, "Sohbet", st))
+        b.cam_state.connect(lambda st: self._set_ind(self.ind_cam, "Kamera", st))
 
         self.poll = QTimer(self, interval=30_000, timeout=self.refresh_channel)
         self.preview_timer = QTimer(self, interval=40, timeout=self._paint_preview)
@@ -397,7 +408,8 @@ class MainWindow(QMainWindow):
             if self.chat_client:
                 self.chat_client.stop()
             self.chat_client = KickChat(room_id, self.bus.chat.emit, self.bus.chat_sys.emit,
-                                        self.cfg["pusher_key"], self.cfg["pusher_cluster"])
+                                        self.cfg["pusher_key"], self.cfg["pusher_cluster"],
+                                        on_state=self.bus.chat_state.emit)
             self.chat_client.start()
 
         if room:
@@ -414,11 +426,17 @@ class MainWindow(QMainWindow):
         badges = "".join(f"[{b}] " for b in m["badges"] if b)
         item = QListWidgetItem(f"{badges}{m['username']}: {m['content']}")
         item.setData(Qt.UserRole, m)
-        item.setForeground(Qt.white)
         self.chat_list.addItem(item)
         if self.chat_list.count() > 500:
             self.chat_list.takeItem(0)
         self.chat_list.scrollToBottom()
+
+    STATES = {"connected": ("#53fc18", "Bağlı"), "connecting": ("#f5a623", "Bağlanıyor..."),
+              "retrying": ("#f5a623", "Yeniden deneniyor..."), "stopped": ("#ff4d4d", "Kapalı")}
+
+    def _set_ind(self, lbl, name, state):
+        color, text = self.STATES.get(state, ("#888", state))
+        lbl.setText(f"{name}: <span style='color:{color}'>●</span> {text}")
 
     def _add_sys(self, text):
         item = QListWidgetItem("⚙ " + text)
@@ -500,7 +518,7 @@ class MainWindow(QMainWindow):
         save_config(self.cfg)
         self.receiver = CameraReceiver(host, self.sp_port.value(), self.bus.frame.emit,
                                        self.bus.status.emit, self.chk_vcam.isChecked(),
-                                       self.sp_fps.value())
+                                       self.sp_fps.value(), on_state=self.bus.cam_state.emit)
         self.receiver.start()
         self.btn_cam.setText("Bağlantıyı Kes")
 

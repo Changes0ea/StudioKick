@@ -58,7 +58,8 @@ class Discovery:
 
 
 class CameraReceiver:
-    def __init__(self, host, port, on_frame, on_status, virtual_cam=True, fps=30):
+    def __init__(self, host, port, on_frame, on_status, virtual_cam=True, fps=30, on_state=None):
+        self.on_state = on_state or (lambda s: None)
         self.host, self.port = host, port
         self.on_frame = on_frame          # on_frame(bgr ndarray)
         self.on_status = on_status
@@ -102,9 +103,11 @@ class CameraReceiver:
     def _run(self):
         while not self._stop.is_set():
             try:
+                self.on_state("connecting")
                 self.on_status(f"{self.host}:{self.port} adresine bağlanılıyor...")
                 sock = socket.create_connection((self.host, self.port), timeout=5)
                 sock.settimeout(5)
+                self.on_state("connected")
                 self.on_status("iPhone kamerasına bağlanıldı")
                 count, t0 = 0, time.time()
                 while not self._stop.is_set():
@@ -126,9 +129,11 @@ class CameraReceiver:
                         count, t0 = 0, time.time()
                 sock.close()
             except Exception as e:
+                self.on_state("retrying")
                 self.on_status(f"Kamera bağlantı hatası: {e} — 2 sn sonra tekrar denenecek")
                 time.sleep(2)
         if self._cam:
             self._cam.close()
             self._cam = None
+        self.on_state("stopped")
         self.on_status("Kamera durduruldu")
