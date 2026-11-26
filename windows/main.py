@@ -1,5 +1,7 @@
 """ChangesStudio — Kick yayıncı paneli + iPhone sanal webcam (Windows)."""
 import collections
+
+import numpy as np
 import html
 import json
 import os
@@ -17,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout,
                                QSpinBox, QStatusBar, QTabWidget, QTextBrowser,
                                QVBoxLayout, QWidget)
 
-from camera_receiver import DEFAULT_PORT, CameraReceiver, Discovery
+from camera_receiver import DEFAULT_PORT, CameraReceiver, Discovery, VirtualCam
 from kick_api import KickAPI
 from kick_chat import DEFAULT_CLUSTER, DEFAULT_KEY, LOG_PATH, KickChat, find_chatroom_id
 
@@ -36,6 +38,8 @@ DEFAULT_CONFIG = {
     "camera_host": "",
     "camera_port": DEFAULT_PORT,
     "camera_fps": 30,
+    "vcam_enabled": True,
+    "vcam_size": "1280x720",
 }
 
 # ChangesCraft tasarım dili (paylaşılan palet)
@@ -198,6 +202,8 @@ class MainWindow(QMainWindow):
 
         self._init_api()
         self._start_discovery()
+        self.vcam = None
+        QTimer.singleShot(300, self._start_vcam)   # NVIDIA Broadcast / Zoom kamerayı hemen bulsun
 
     def _build_header(self):
         bar = QWidget(objectName="header")
@@ -321,11 +327,20 @@ class MainWindow(QMainWindow):
         self.ed_host = QLineEdit(self.cfg["camera_host"], placeholderText="iPhone IP (örn. 192.168.1.34)")
         self.sp_port = QSpinBox(maximum=65535, value=int(self.cfg["camera_port"]))
         self.sp_fps = QSpinBox(minimum=5, maximum=60, value=int(self.cfg["camera_fps"]))
-        self.chk_vcam = QCheckBox("Sanal webcam olarak yayınla (OBS Virtual Camera)", checked=True)
+        self.chk_vcam = QCheckBox("Sanal webcam her zaman açık (OBS Virtual Camera)",
+                                  checked=bool(self.cfg.get("vcam_enabled", True)))
+        self.chk_vcam.toggled.connect(self._vcam_toggled)
+        self.cmb_vsize = QComboBox()
+        for size in ("1280x720", "1920x1080"):
+            self.cmb_vsize.addItem(size)
+        self.cmb_vsize.setCurrentText(self.cfg.get("vcam_size", "1280x720"))
+        self.cmb_vsize.currentTextChanged.connect(lambda _: self._restart_vcam())
+        self.sp_fps.valueChanged.connect(lambda _: self._restart_vcam())
         f.addRow("Bulunanlar:", self.cmb_dev)
         f.addRow("IP:", self.ed_host)
         f.addRow("Port:", self.sp_port)
         f.addRow("FPS:", self.sp_fps)
+        f.addRow("Sanal kamera:", self.cmb_vsize)
         f.addRow(self.chk_vcam)
         self.btn_cam = QPushButton("Bağlan", clicked=self.toggle_camera)
         f.addRow(self.btn_cam)
@@ -336,7 +351,10 @@ class MainWindow(QMainWindow):
             "1. iPhone'da <b>ChangesLens</b> uygulamasını aç, YAYINI BAŞLAT'a bas.<br>"
             "2. Telefon ve bilgisayar aynı Wi‑Fi'da olmalı.<br>"
             "3. Listeden iPhone'u seç ya da ekranda yazan IP'yi gir, Bağlan.<br>"
-            "4. OBS / Discord / Zoom'da kamera olarak <b>OBS Virtual Camera</b> seç.<br><br>"
+            "4. OBS / Discord / Zoom'da kamera olarak <b>OBS Virtual Camera</b> seç.<br>"
+            "5. <b>NVIDIA Broadcast</b>: Kamera kaynağı olarak <b>OBS Virtual Camera</b> seç, sonra "
+            "OBS'te kamera olarak <b>Camera (NVIDIA Broadcast)</b> kullan.<br><br>"
+            "<i>OBS'in kendi \"Sanal Kamerayı Başlat\" butonuna basma — sanal kamerayı ChangesStudio kullanıyor.</i><br>"
             "<i>Sanal kamera için OBS Studio (28+) kurulu olmalıdır.</i>")
         help_.setWordWrap(True)
         side.addWidget(help_)
@@ -640,12 +658,74 @@ class MainWindow(QMainWindow):
             return self.bus.error.emit("iPhone IP adresini girin")
         self.cfg.update(camera_host=host, camera_port=self.sp_port.value(), camera_fps=self.sp_fps.value())
         save_config(self.cfg)
-        self.receiver = CameraReceiver(host, self.sp_port.value(), self.bus.frame.emit,
-                                       self.bus.status.emit, self.chk_vcam.isChecked(),
-                                       self.sp_fps.value(), on_state=self.bus.cam_state.emit,
+        self.receiver = CameraReceiver(host, self.sp_port.value(), self._on_cam_frame,
+                                       self.bus.status.emit, on_state=self.bus.cam_state.emit,
                                        history=list(self._recent))
         self.receiver.start()
         self.btn_cam.setText("Bağlantıyı Kes")
+
+    # ---- sürekli açık sanal kamera ----
+    def _on_cam_frame(self, frame):
+        """Alıcı thread'inden: kareyi sanal kameraya ve önizlemeye ver."""
+        if self.vcam:
+            self.vcam.submit(frame)
+        self.bus.frame.emit(frame)
+
+    def _placeholder(self, w=1920, h=1080):
+        """iPhone bağlı değilken sanal kamerada görünen logolu bekleme ekranı."""
+        img = QImage(w, h, QImage.Format_RGB888)
+        img.fill(QColor(P["night"]))
+        from PySide6.QtGui import QLinearGradient, QPainter
+        pt = QPainter(img)
+        pt.setRenderHint(QPainter.Antialiasing)
+        g = QLinearGradient(0, h, w, 0)
+        g.setColorAt(0, QColor(P["forest"]))
+        g.setColorAt(0.5, QColor(P["night"]))
+        pt.fillRect(0, 0, w, h, g)
+        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        logo = QPixmap(os.path.join(base, "assets", "logo.png"))
+        if not logo.isNull():
+            logo = logo.scaledToHeight(int(h * 0.28), Qt.SmoothTransformation)
+            pt.drawPixmap((w - logo.width()) // 2, int(h * 0.26), logo)
+        f = QFont(BRAND_FONT, int(h * 0.035))
+        f.setWeight(QFont.ExtraBold)
+        pt.setFont(f)
+        pt.setPen(QColor(P["ice"]))
+        pt.drawText(0, int(h * 0.60), w, int(h * 0.08), Qt.AlignCenter, "iPhone kamerası bekleniyor")
+        f.setPointSize(int(h * 0.018))
+        f.setWeight(QFont.Medium)
+        pt.setFont(f)
+        pt.setPen(QColor(P["lav"]))
+        pt.drawText(0, int(h * 0.68), w, int(h * 0.06), Qt.AlignCenter,
+                    "ChangesLens'te YAYINI BAŞLAT'a bas, ChangesStudio'da Bağlan'a tıkla")
+        pt.end()
+        arr = np.frombuffer(img.constBits(), np.uint8).reshape(h, img.bytesPerLine())[:, :w * 3]
+        return cv2.cvtColor(arr.reshape(h, w, 3), cv2.COLOR_RGB2BGR)
+
+    def _start_vcam(self):
+        if self.vcam or not self.chk_vcam.isChecked():
+            return
+        w, h = map(int, self.cmb_vsize.currentText().split("x"))
+        self.vcam = VirtualCam(w, h, self.sp_fps.value(), self._placeholder(), self.bus.status.emit)
+        if not self.vcam.start():
+            self.vcam = None
+
+    def _stop_vcam(self):
+        if self.vcam:
+            self.vcam.stop()
+            self.vcam = None
+
+    def _restart_vcam(self):
+        self.cfg.update(vcam_size=self.cmb_vsize.currentText(), camera_fps=self.sp_fps.value())
+        save_config(self.cfg)
+        if self.vcam:
+            self._stop_vcam()
+            QTimer.singleShot(500, self._start_vcam)   # eski cihaz kapanana kadar bekle
+
+    def _vcam_toggled(self, on):
+        self.cfg["vcam_enabled"] = on
+        save_config(self.cfg)
+        self._start_vcam() if on else self._stop_vcam()
 
     def _store_frame(self, frame):
         self._last_frame = frame
@@ -663,6 +743,7 @@ class MainWindow(QMainWindow):
             self.lbl_fps.setText(f"FPS: {self.receiver.stats_fps:.1f}   Çözünürlük: {w}x{h}")
 
     def closeEvent(self, e):
+        self._stop_vcam()
         if self.receiver:
             self.receiver.stop()
         if self.chat_client:

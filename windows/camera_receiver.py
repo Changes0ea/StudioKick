@@ -4,7 +4,8 @@ Protokol: TCP, her kare = 4 bayt big-endian uzunluk + JPEG verisi (iPhone -> PC)
 Ters yönde (PC -> iPhone) aynı bağlantıdan 4 bayt uzunluk + JSON gönderilir
 (sohbet mesajları: {"type": "chat"|"event"|"sys", ...}).
 Sanal kamera: pyvirtualcam (Windows'ta OBS Virtual Camera sürücüsünü kullanır;
-OBS Studio'nun kurulu olması yeterli, OBS'in açık olması gerekmez).
+OBS Studio'nun kurulu olması yeterli, OBS'in açık olması gerekmez). Kamera sabit
+çözünürlükte ve sürekli açıktır; bkz. VirtualCam.
 """
 import json
 import socket
@@ -61,9 +62,73 @@ class Discovery:
         pass
 
 
+class VirtualCam:
+    """Sabit çözünürlükte sürekli kare basan sanal kamera.
+
+    NVIDIA Broadcast, Zoom gibi uygulamalar kamerayı seçtikleri an görüntü bekler; kamera
+    yoksa ya da çözünürlüğü değişirse seçimi geri alırlar. Bu yüzden kamera uygulama açılır
+    açılmaz başlar, iPhone bağlı değilken bekleme ekranı gösterir ve hiç kapanmaz.
+    """
+
+    def __init__(self, width, height, fps, placeholder, on_status):
+        self.width, self.height, self.fps = width, height, fps
+        self.placeholder = cv2.resize(placeholder, (width, height))
+        self.on_status = on_status
+        self._latest = None
+        self._latest_at = 0.0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self.device = None
+        self.running = False
+
+    def start(self):
+        if pyvirtualcam is None:
+            self.on_status("Sanal kamera modülü (pyvirtualcam) yüklü değil")
+            return False
+        threading.Thread(target=self._run, daemon=True).start()
+        return True
+
+    def stop(self):
+        self._stop.set()
+
+    def submit(self, frame):
+        """iPhone'dan gelen kareyi sabit boyuta oturt (siyah kenarlı, oran korunur)."""
+        h, w = frame.shape[:2]
+        if (w, h) != (self.width, self.height):
+            scale = min(self.width / w, self.height / h)
+            nw, nh = int(w * scale), int(h * scale)
+            canvas = np.zeros((self.height, self.width, 3), np.uint8)
+            x, y = (self.width - nw) // 2, (self.height - nh) // 2
+            canvas[y:y + nh, x:x + nw] = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_AREA)
+            frame = canvas
+        with self._lock:
+            self._latest, self._latest_at = frame, time.time()
+
+    def _run(self):
+        try:
+            cam = pyvirtualcam.Camera(width=self.width, height=self.height, fps=self.fps,
+                                      fmt=pyvirtualcam.PixelFormat.BGR)
+        except Exception as e:
+            self.on_status(f"Sanal kamera açılamadı: {e} — OBS Studio kurulu mu, OBS'in kendi "
+                           "sanal kamerası açık mı?")
+            return
+        self.device, self.running = cam.device, True
+        self.on_status(f"Sanal kamera hazır: {cam.device} ({self.width}x{self.height}, {self.fps} FPS)")
+        try:
+            while not self._stop.is_set():
+                with self._lock:
+                    fresh = self._latest is not None and time.time() - self._latest_at < 1.5
+                    frame = self._latest if fresh else self.placeholder
+                cam.send(frame)
+                cam.sleep_until_next_frame()
+        finally:
+            cam.close()
+            self.running = False
+            self.on_status("Sanal kamera kapatıldı")
+
+
 class CameraReceiver:
-    def __init__(self, host, port, on_frame, on_status, virtual_cam=True, fps=30, on_state=None,
-                 history=None):
+    def __init__(self, host, port, on_frame, on_status, on_state=None, history=None):
         self.on_state = on_state or (lambda s: None)
         self._sock = None
         self._send_lock = threading.Lock()
@@ -71,10 +136,7 @@ class CameraReceiver:
         self.host, self.port = host, port
         self.on_frame = on_frame          # on_frame(bgr ndarray)
         self.on_status = on_status
-        self.virtual_cam = virtual_cam and pyvirtualcam is not None
-        self.fps = fps
         self._stop = threading.Event()
-        self._cam = None
         self.stats_fps = 0.0
 
     def start(self):
@@ -109,22 +171,6 @@ class CameraReceiver:
             buf.extend(chunk)
         return bytes(buf)
 
-    def _ensure_cam(self, w, h):
-        if not self.virtual_cam:
-            return
-        if self._cam and (self._cam.width, self._cam.height) == (w, h):
-            return
-        if self._cam:
-            self._cam.close()
-        try:
-            self._cam = pyvirtualcam.Camera(width=w, height=h, fps=self.fps,
-                                            fmt=pyvirtualcam.PixelFormat.BGR)
-            self.on_status(f"Sanal kamera aktif: {self._cam.device} ({w}x{h})")
-        except Exception as e:
-            self._cam = None
-            self.virtual_cam = False
-            self.on_status(f"Sanal kamera açılamadı (OBS Studio kurulu mu?): {e}")
-
     def _run(self):
         while not self._stop.is_set():
             try:
@@ -147,10 +193,6 @@ class CameraReceiver:
                     frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
                     if frame is None:
                         continue
-                    h, w = frame.shape[:2]
-                    self._ensure_cam(w, h)
-                    if self._cam:
-                        self._cam.send(frame)
                     self.on_frame(frame)
                     count += 1
                     if time.time() - t0 >= 1:
@@ -163,8 +205,5 @@ class CameraReceiver:
                 self.on_state("retrying")
                 self.on_status(f"Kamera bağlantı hatası: {e} — 2 sn sonra tekrar denenecek")
                 time.sleep(2)
-        if self._cam:
-            self._cam.close()
-            self._cam = None
         self.on_state("stopped")
         self.on_status("Kamera durduruldu")
