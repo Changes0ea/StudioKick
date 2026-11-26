@@ -7,8 +7,14 @@ on:
 
 jobs:
   ios:
-    name: iPhone uygulaması (KickCam.ipa)
-    runs-on: macos-15
+    # Mac sunucuları sık sık dolu oluyor: üç farklı türde aynı anda dene, hangisi önce biterse onu indir.
+    name: iPhone uygulaması (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-14]
     steps:
       - uses: actions/checkout@v4
       - name: Klasör düzenini düzelt (dosyalar KickStudio/ içine yüklendiyse)
@@ -36,7 +42,7 @@ jobs:
           zip -qry KickCam.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: KickCam-iPhone
+          name: KickCam-iPhone-${{ matrix.os }}
           path: KickCam.ipa
 
   windows:
