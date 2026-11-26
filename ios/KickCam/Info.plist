@@ -14,7 +14,7 @@
 	<key>NSCameraUsageDescription</key><string>iPhone kameranızı bilgisayarınızda webcam olarak kullanmak için gereklidir.</string>
 	<key>NSLocalNetworkUsageDescription</key><string>Görüntüyü aynı Wi‑Fi ağındaki bilgisayarınıza göndermek için gereklidir.</string>
 	<key>NSBonjourServices</key><array><string>_kickcam._tcp</string></array>
-	<key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
+	<key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationLandscapeRight</string><string>UIInterfaceOrientationLandscapeLeft</string></array>
 	<key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
 </dict>
 </plist>

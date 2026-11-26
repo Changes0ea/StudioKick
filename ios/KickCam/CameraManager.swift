@@ -36,6 +36,9 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private let videoQueue = DispatchQueue(label: "kickcam.video")
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private var device: AVCaptureDevice?
+    private var videoOutput: AVCaptureVideoDataOutput?
+    private weak var previewLayer: AVCaptureVideoPreviewLayer?
+    private var videoOrientation: AVCaptureVideoOrientation = .landscapeRight
     private var lastSent = CFAbsoluteTimeGetCurrent()
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
@@ -47,6 +50,12 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             self.clientCount = n
         }
         server.onMessage = { [weak self] obj in self?.handle(obj) }
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        NotificationCenter.default.addObserver(forName: UIDevice.orientationDidChangeNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            // ekran dönme animasyonu bitince arayüz yönünü oku
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self?.updateOrientation() }
+        }
     }
 
     func start() {
@@ -74,6 +83,31 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         server.stop()
         isRunning = false
         UIApplication.shared.isIdleTimerDisabled = false
+    }
+
+    /// Önizleme katmanı oluşunca çağrılır.
+    func attachPreview(_ layer: AVCaptureVideoPreviewLayer) {
+        previewLayer = layer
+        updateOrientation()
+    }
+
+    /// Ekran yatayda sağa/sola çevrildiğinde önizlemeyi ve PC'ye giden görüntüyü düz tutar.
+    func updateOrientation() {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let o: AVCaptureVideoOrientation
+        switch scene?.interfaceOrientation ?? .landscapeRight {
+        case .landscapeLeft: o = .landscapeLeft
+        case .portrait: o = .portrait
+        case .portraitUpsideDown: o = .portraitUpsideDown
+        default: o = .landscapeRight
+        }
+        videoOrientation = o
+        if let c = previewLayer?.connection, c.isVideoOrientationSupported { c.videoOrientation = o }
+        sessionQueue.async {
+            if let c = self.videoOutput?.connection(with: .video), c.isVideoOrientationSupported {
+                c.videoOrientation = o
+            }
+        }
     }
 
     private func handle(_ obj: [String: Any]) {
@@ -115,12 +149,9 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             out.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
             out.setSampleBufferDelegate(self, queue: self.videoQueue)
             if self.session.canAddOutput(out) { self.session.addOutput(out) }
+            self.videoOutput = out
             if let conn = out.connection(with: .video) {
-                if #available(iOS 17.0, *) {
-                    if conn.isVideoRotationAngleSupported(0) { conn.videoRotationAngle = 0 } // yatay
-                } else {
-                    conn.videoOrientation = .landscapeRight
-                }
+                if conn.isVideoOrientationSupported { conn.videoOrientation = self.videoOrientation }
                 if front && conn.isVideoMirroringSupported {
                     conn.automaticallyAdjustsVideoMirroring = false
                     conn.isVideoMirrored = true
@@ -128,7 +159,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             }
             self.session.commitConfiguration()
             if !self.session.isRunning { self.session.startRunning() }
-            DispatchQueue.main.async { self.applyZoom(); self.applyTorch() }
+            DispatchQueue.main.async { self.applyZoom(); self.applyTorch(); self.updateOrientation() }
         }
     }
 
