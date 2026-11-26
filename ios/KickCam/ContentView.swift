@@ -1,4 +1,5 @@
 import AVFoundation
+import PhotosUI
 import SwiftUI
 
 // ChangesCraft tasarım dili (paylaşılan palet)
@@ -184,6 +185,12 @@ struct StreamTab: View {
                     VStack(spacing: 8) {
                         header
                         CameraPreview(session: cam.session, onLayer: cam.attachPreview)
+                            .overlay {
+                                if let fx = cam.effectPreview {
+                                    Image(decorative: fx, scale: 1).resizable().aspectRatio(contentMode: .fit)
+                                        .background(Brand.night)
+                                }
+                            }
                             .aspectRatio(16 / 9, contentMode: .fit)
                             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Brand.accent, lineWidth: 3))
@@ -237,11 +244,23 @@ struct StreamTab: View {
         }
     }
 
+    private func fxButton(_ icon: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(on ? AnyShapeStyle(Brand.accent) : AnyShapeStyle(Brand.navy.opacity(0.75))))
+                .foregroundColor(on ? Brand.night : Brand.ice)
+        }
+    }
+
     @ViewBuilder private var liveTag: some View {
         if cam.isRunning && cam.clientCount > 0 {
             HStack(spacing: 5) {
                 PulseDot()
                 Text("YAYINDA").font(Brand.font(11, .heavy)).tracking(1)
+                if cam.autoFrame { Image(systemName: "person.crop.rectangle").font(.system(size: 10, weight: .bold)) }
+                if cam.background != .off { Image(systemName: "person.and.background.dotted").font(.system(size: 10, weight: .bold)) }
             }
             .padding(.horizontal, 10).padding(.vertical, 4)
             .background(Capsule().fill(Color.red.opacity(0.9)))
@@ -265,6 +284,16 @@ struct StreamTab: View {
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
             Spacer(minLength: 4)
+            fxButton("person.crop.rectangle", on: cam.autoFrame) { cam.autoFrame.toggle() }
+            fxButton("person.and.background.dotted", on: cam.background != .off) {
+                // Kapalı -> Bulanık -> Görsel (seçildiyse) -> Yeşil Perde -> Kapalı
+                switch cam.background {
+                case .off: cam.background = .blur
+                case .blur: cam.background = cam.backgroundThumb != nil ? .image : .green
+                case .image: cam.background = .green
+                case .green: cam.background = .off
+                }
+            }
             Button(action: { cam.useFront.toggle() }) {
                 Image(systemName: "arrow.triangle.2.circlepath.camera")
                     .font(.system(size: 16, weight: .semibold))
@@ -294,6 +323,7 @@ struct StreamTab: View {
 // MARK: - AYARLAR sekmesi
 struct SettingsTab: View {
     @ObservedObject var cam: CameraManager
+    @State private var pickedPhoto: PhotosPickerItem?
 
     var body: some View {
         ZStack {
@@ -309,6 +339,46 @@ struct SettingsTab: View {
                     }.pickerStyle(.segmented)
                     Toggle("Fener", isOn: $cam.torch).disabled(cam.useFront)
                 } header: { sectionTitle("KAMERA") }
+                .listRowBackground(Brand.navy.opacity(0.35))
+
+                Section {
+                    Toggle("Otomatik Kadraj (yüz takibi)", isOn: $cam.autoFrame)
+                    if cam.autoFrame {
+                        sliderRow("YAKINLIK", cam.frameTightness < 2.8 ? "Yakın" : cam.frameTightness > 3.8 ? "Geniş" : "Orta") {
+                            Slider(value: $cam.frameTightness, in: 2.2...4.5)
+                        }
+                    }
+                    Picker("Arka plan", selection: $cam.background) {
+                        ForEach(BackgroundMode.allCases) { Text($0.rawValue).tag($0) }
+                    }.pickerStyle(.segmented)
+                    if cam.background == .blur {
+                        sliderRow("BULANIK", "\(Int(cam.blurRadius))") { Slider(value: $cam.blurRadius, in: 6...40) }
+                    }
+                    PhotosPicker(selection: $pickedPhoto, matching: .images) {
+                        HStack(spacing: 12) {
+                            if let thumb = cam.backgroundThumb {
+                                Image(uiImage: thumb).resizable().scaledToFill()
+                                    .frame(width: 64, height: 36)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            } else {
+                                Image(systemName: "photo.on.rectangle.angled").foregroundColor(Brand.turq)
+                            }
+                            Text(cam.backgroundThumb == nil ? "Arka plan görseli seç" : "Arka plan görselini değiştir")
+                                .foregroundColor(Brand.ice)
+                        }
+                    }
+                    .onChange(of: pickedPhoto) { item in
+                        Task {
+                            if let data = try? await item?.loadTransferable(type: Data.self),
+                               let img = UIImage(data: data) {
+                                await MainActor.run { cam.setBackgroundImage(img) }
+                            }
+                        }
+                    }
+                } header: { sectionTitle("EFEKTLER") } footer: {
+                    Text("Efektler telefonda işlenir; NVIDIA Broadcast gerekmez. Yeşil Perde, OBS'te Chroma Key ile arka planı tamamen silmek içindir. Eski iPhone'larda takılma olursa FPS'i 24'e indir.")
+                        .foregroundColor(Brand.lav)
+                }
                 .listRowBackground(Brand.navy.opacity(0.35))
 
                 Section {

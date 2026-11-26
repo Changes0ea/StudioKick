@@ -30,6 +30,20 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published var errorMessage: String?
     @Published var chat: [ChatLine] = []
 
+    // Efektler (NVIDIA Broadcast'teki otomatik kadraj ve sanal arka planın karşılığı)
+    @Published var autoFrame = UserDefaults.standard.bool(forKey: "autoFrame") {
+        didSet { effects.autoFrame = autoFrame; UserDefaults.standard.set(autoFrame, forKey: "autoFrame") }
+    }
+    @Published var frameTightness: Double = 3.2 { didSet { effects.frameTightness = frameTightness } }
+    @Published var background: BackgroundMode =
+        BackgroundMode(rawValue: UserDefaults.standard.string(forKey: "background") ?? "") ?? .off {
+        didSet { effects.background = background; UserDefaults.standard.set(background.rawValue, forKey: "background") }
+    }
+    @Published var blurRadius: Double = 18 { didSet { effects.blurRadius = blurRadius } }
+    @Published var backgroundThumb: UIImage?
+    /// Efekt açıkken telefonda gösterilen işlenmiş önizleme
+    @Published var effectPreview: CGImage?
+
     let session = AVCaptureSession()
     private let server = FrameServer()
     private let sessionQueue = DispatchQueue(label: "kickcam.session")
@@ -41,6 +55,12 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private var videoOrientation: AVCaptureVideoOrientation = .landscapeRight
     private var lastSent = CFAbsoluteTimeGetCurrent()
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    private let effects = VideoEffects()
+    private var lastPreview: CFAbsoluteTime = 0
+    private var previewShown = false
+    private static var backgroundURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("background.jpg")
+    }
 
     override init() {
         super.init()
@@ -50,6 +70,11 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             self.clientCount = n
         }
         server.onMessage = { [weak self] obj in self?.handle(obj) }
+        effects.autoFrame = autoFrame
+        effects.background = background
+        if let data = try? Data(contentsOf: Self.backgroundURL), let img = UIImage(data: data) {
+            setBackgroundImage(img, save: false)
+        }
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         NotificationCenter.default.addObserver(forName: UIDevice.orientationDidChangeNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -61,7 +86,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     func start() {
         AVCaptureDevice.requestAccess(for: .video) { granted in
             guard granted else {
-                DispatchQueue.main.async { self.errorMessage = "Kamera izni verilmedi (Ayarlar > KickCam)." }
+                DispatchQueue.main.async { self.errorMessage = "Kamera izni verilmedi (Ayarlar > ChangesLens)." }
                 return
             }
             do {
@@ -108,6 +133,24 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 c.videoOrientation = o
             }
         }
+    }
+
+    /// Galeriden seçilen arka plan görselini hazırla (yönünü düzelt, küçült, kaydet).
+    func setBackgroundImage(_ img: UIImage, save: Bool = true) {
+        let maxSide: CGFloat = 1920
+        let scale = min(1, maxSide / max(img.size.width, img.size.height))
+        let size = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let normalized = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            img.draw(in: CGRect(origin: .zero, size: size))
+        }
+        if let cg = normalized.cgImage { effects.backgroundImage = CIImage(cgImage: cg) }
+        backgroundThumb = normalized
+        if save, let data = normalized.jpegData(compressionQuality: 0.9) {
+            try? data.write(to: Self.backgroundURL)
+        }
+        if background == .off || background == .blur { background = .image }
     }
 
     private func handle(_ obj: [String: Any]) {
@@ -175,15 +218,35 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         d.unlockForConfiguration()
     }
 
-    // Kamera karesi geldi -> JPEG'e çevir -> gönder
+    // Kamera karesi geldi -> efektleri uygula -> JPEG'e çevir -> gönder
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
-        guard server.hasClients else { return }
+        let hasClients = server.hasClients
+        let fxOn = effects.isActive
+        if !fxOn && previewShown {
+            previewShown = false
+            DispatchQueue.main.async { self.effectPreview = nil }
+        }
+        guard hasClients || fxOn else { return }
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastSent >= (1.0 / fps) * 0.95 else { return }
         lastSent = now
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let image = CIImage(cvPixelBuffer: pb)
+
+        let image = fxOn ? effects.process(pb) : CIImage(cvPixelBuffer: pb)
+
+        // Telefondaki önizleme: efekt açıkken işlenmiş görüntüyü ~15 FPS göster
+        if fxOn && now - lastPreview > 1.0 / 15 {
+            lastPreview = now
+            let s = 640 / image.extent.width
+            let small = image.transformed(by: CGAffineTransform(scaleX: s, y: s))
+            if let cg = ciContext.createCGImage(small, from: small.extent) {
+                previewShown = true
+                DispatchQueue.main.async { self.effectPreview = cg }
+            }
+        }
+
+        guard hasClients else { return }
         let opts: [CIImageRepresentationOption: Any] = [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality]
         if let jpeg = ciContext.jpegRepresentation(of: image, colorSpace: colorSpace, options: opts) {
             server.send(jpeg: jpeg)
