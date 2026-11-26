@@ -1,0 +1,20 @@
+# XcodeGen ile proje oluşturma (Mac'te):  brew install xcodegen && xcodegen
+name: KickCam
+options:
+  bundleIdPrefix: com.kickstudio
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  KickCam:
+    type: application
+    platform: iOS
+    sources: [KickCam]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kickstudio.kickcam
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: KickCam/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        # DEVELOPMENT_TEAM: XXXXXXXXXX   <- Apple ID takım kimliğiniz
