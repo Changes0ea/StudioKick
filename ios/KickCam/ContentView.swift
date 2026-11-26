@@ -121,7 +121,8 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center, spacing: 8) {
+            Image("Logo").resizable().scaledToFit().frame(height: 34)
             (Text("CHANGES").foregroundColor(Brand.ice) + Text("CRAFT").foregroundColor(Brand.blue))
                 .font(.system(size: 22, weight: .light))
                 .tracking(4)

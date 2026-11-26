@@ -17,4 +17,5 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: KickCam/Info.plist
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # DEVELOPMENT_TEAM: XXXXXXXXXX   <- Apple ID takım kimliğiniz

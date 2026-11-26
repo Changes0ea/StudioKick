@@ -8,7 +8,7 @@ import time
 
 import cv2
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QImage, QPixmap
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout,
                                QGroupBox, QHBoxLayout, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem,
@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
         logo_path = os.path.join(base, "assets", "logo.png")
         if os.path.exists(logo_path):
             logo = QLabel()
-            logo.setPixmap(QPixmap(logo_path).scaledToHeight(40, Qt.SmoothTransformation))
+            logo.setPixmap(QPixmap(logo_path).scaledToHeight(52, Qt.SmoothTransformation))
             h.addWidget(logo)
         mark = QLabel(f"<span style='color:{P['ice']}'>CHANGES</span>"
                       f"<span style='color:{P['blue']}'>CRAFT</span>")
@@ -634,6 +634,9 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(STYLE)
+    ico = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "assets", "icon.ico")
+    if os.path.exists(ico):
+        app.setWindowIcon(QIcon(ico))
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
