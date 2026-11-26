@@ -7,14 +7,14 @@ on:
 
 jobs:
   ios:
-    # Mac sunucuları sık sık dolu oluyor: üç farklı türde aynı anda dene, hangisi önce biterse onu indir.
+    # Mac sunucu türü (gerekirse listeye macos-15 eklenebilir)
     name: iPhone uygulaması (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-15-intel, macos-14]
+        os: [macos-15-intel]   # Apple Silicon (macos-15) sunucuları sürekli dolu, Intel sorunsuz çalışıyor
     steps:
       - uses: actions/checkout@v4
       - name: Klasör düzenini düzelt (dosyalar KickStudio/ içine yüklendiyse)
